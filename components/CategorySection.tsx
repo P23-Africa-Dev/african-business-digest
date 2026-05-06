@@ -22,19 +22,19 @@ interface Props {
 
 export default function CategorySection({ category, stories }: Props) {
   return (
-    <section aria-labelledby={`cat-${category}`} className="mb-10">
-      <div className="flex items-center gap-2 mb-4">
-        <span className="text-xl" aria-hidden="true">{CATEGORY_ICONS[category]}</span>
+    <section aria-labelledby={`cat-${category}`} className="mb-11">
+      <div className="flex items-center gap-2.5 mb-4">
+        <span className="text-xl h-8 w-8 rounded-full border inline-flex items-center justify-center bg-white" style={{ borderColor: 'var(--rule-light)' }} aria-hidden="true">{CATEGORY_ICONS[category]}</span>
         <h2
           id={`cat-${category}`}
-          className="font-display text-xl font-bold tracking-tight"
+          className="font-display text-xl sm:text-2xl font-bold tracking-tight"
           style={{ color: 'var(--forest)' }}
         >
           {CATEGORY_LABELS[category]}
         </h2>
         <span
-          className="text-xs font-medium px-2 py-0.5 rounded-full ml-1"
-          style={{ background: 'var(--rule-light)', color: 'var(--ink-soft)' }}
+          className="text-xs font-semibold px-2 py-0.5 rounded-full ml-1"
+          style={{ background: 'var(--emerald-fade)', color: 'var(--forest-mid)' }}
         >
           {stories.length}
         </span>

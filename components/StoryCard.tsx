@@ -33,25 +33,25 @@ export default function StoryCard({ story }: Props) {
 
   return (
     <article
-      className="story-card bg-white rounded-lg border p-5"
+      className="story-card rounded-xl border p-5 md:p-6"
       style={{ borderColor: 'var(--rule)' }}
     >
       {/* Headline */}
-      <h3 className="font-display text-lg leading-snug mb-2" style={{ color: 'var(--ink)' }}>
+      <h3 className="font-display text-xl leading-snug mb-2.5" style={{ color: 'var(--ink)' }}>
         {story.headline}
       </h3>
 
       {/* Summary */}
-      <p className="text-sm leading-relaxed mb-4" style={{ color: 'var(--ink-mid)' }}>
+      <p className="text-[0.95rem] leading-relaxed mb-5" style={{ color: 'var(--ink-mid)' }}>
         {story.summary}
       </p>
 
       {/* Meta row */}
-      <div className="flex flex-wrap items-center gap-2 text-xs">
+      <div className="flex flex-wrap items-center gap-2.5 text-xs">
         {/* Category badge */}
         <span
-          className="px-2 py-0.5 rounded font-medium"
-          style={{ background: 'var(--amber-pale)', color: 'var(--amber)', border: '1px solid #f0e0b0' }}
+          className="px-2.5 py-0.5 rounded-md font-semibold"
+          style={{ background: 'var(--amber-pale)', color: 'var(--amber)', border: '1px solid #f2d8a5' }}
         >
           {CATEGORY_LABELS[story.category]}
         </span>
@@ -59,7 +59,7 @@ export default function StoryCard({ story }: Props) {
         {/* Status pill */}
         {isNew && (
           <span
-            className="badge-new px-2 py-0.5 rounded-full font-semibold tracking-wide uppercase"
+            className="badge-new px-2 py-0.5 rounded-full font-semibold tracking-wide uppercase shadow-sm"
             style={{ background: 'var(--forest)', color: 'white', fontSize: '0.65rem' }}
           >
             New
@@ -67,7 +67,7 @@ export default function StoryCard({ story }: Props) {
         )}
         {isDeveloping && (
           <span
-            className="px-2 py-0.5 rounded-full font-medium uppercase tracking-wide"
+            className="px-2 py-0.5 rounded-full font-semibold uppercase tracking-wide"
             style={{ background: '#fef3c7', color: '#92400e', fontSize: '0.65rem' }}
           >
             Developing
@@ -83,17 +83,24 @@ export default function StoryCard({ story }: Props) {
         ))}
 
         {/* Age */}
-        <span style={{ color: 'var(--fading-text)', marginLeft: 'auto' }}>
-          {formatAge(story.first_seen_at)}
+          <span className="font-medium" style={{ color: 'var(--fading-text)', marginLeft: 'auto' }}>
+          {story.last_updated_at !== story.first_seen_at &&
+          new Date(story.last_updated_at).toDateString() !== new Date(story.first_seen_at).toDateString() ? (
+            <span title={`First seen ${formatAge(story.first_seen_at)}`}>
+              updated {formatAge(story.last_updated_at)}
+            </span>
+          ) : (
+            formatAge(story.first_seen_at)
+          )}
         </span>
       </div>
 
       {/* Sources toggle */}
       {sources.length > 0 && (
-        <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--rule-light)' }}>
+        <div className="mt-4 pt-3.5" style={{ borderTop: '1px solid var(--rule-light)' }}>
           <button
             onClick={() => setSourcesOpen((o) => !o)}
-            className="flex items-center gap-1 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2"
+            className="flex items-center gap-1 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2"
             style={{ color: 'var(--forest)' }}
             aria-expanded={sourcesOpen}
           >
@@ -102,7 +109,7 @@ export default function StoryCard({ story }: Props) {
           </button>
 
           {sourcesOpen && (
-            <ul className="mt-2 space-y-1.5">
+            <ul className="mt-2.5 space-y-2">
               {sources.map((src) => {
                 const item = src.raw_item
                 if (!item) return null

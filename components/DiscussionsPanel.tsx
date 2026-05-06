@@ -4,10 +4,10 @@ import type { Discussion } from '@/lib/types'
 export default function DiscussionsPanel({ discussions }: { discussions: Discussion[] }) {
   return (
     <aside aria-label="What people are discussing">
-      <div className="sticky top-[89px]">
+      <div className="sticky top-[96px] rounded-2xl p-4 frost-panel">
         <div className="flex items-center gap-2 mb-4">
-          <span className="text-xl" aria-hidden="true">💬</span>
-          <h2 className="font-display text-xl font-bold" style={{ color: 'var(--forest)' }}>
+          <span className="text-xl h-8 w-8 rounded-full border inline-flex items-center justify-center bg-white" style={{ borderColor: 'var(--rule-light)' }} aria-hidden="true">💬</span>
+          <h2 className="font-display text-xl font-bold tracking-tight" style={{ color: 'var(--forest)' }}>
             Discussions
           </h2>
         </div>

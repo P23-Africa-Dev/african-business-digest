@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { revalidatePath } from 'next/cache'
 import { runIngestion } from '@/lib/sources'
 import { clusterRawItems } from '@/lib/processing/cluster'
 import { runDiff } from '@/lib/processing/diff'
@@ -53,6 +54,7 @@ export async function GET(req: Request) {
       log.countsAfterIngestion = await tableCounts()
       log.totalMs = Date.now() - start
       log.status = 'ingest_only_budget'
+      revalidatePath('/')
       return NextResponse.json(log)
     } catch (err) {
       console.error('[Cron] Ingest-only fatal:', err)
@@ -99,6 +101,7 @@ export async function GET(req: Request) {
 
     log.totalMs = Date.now() - start
     log.status = 'ok'
+    revalidatePath('/')
     return NextResponse.json(log)
   } catch (err) {
     console.error('[Cron] Fatal error:', err)

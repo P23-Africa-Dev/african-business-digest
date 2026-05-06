@@ -11,6 +11,7 @@ export interface IngestResult {
   search: number
   twitter: number
   total: number
+  persisted: number
   errors: string[]
 }
 
@@ -55,25 +56,49 @@ export async function runIngestion(): Promise<IngestResult> {
 
   const allItems: RawItem[] = [...rssItems, ...redditItems, ...searchItems, ...twitterItems]
 
+  let persisted = 0
+
   if (allItems.length > 0) {
-    const { error } = await db.from('raw_items').upsert(
-      allItems.map((item) => ({
-        source_type: item.source_type,
-        source_name: item.source_name,
-        url: item.url,
-        title: item.title,
-        raw_content: item.raw_content ?? null,
-        published_at: item.published_at ?? null,
-        ingested_at: new Date().toISOString(),
-        country_tags: item.country_tags,
-        engagement_score: item.engagement_score ?? 0,
-      })),
-      { onConflict: 'url', ignoreDuplicates: false }
-    )
+    const ingestedAt = new Date().toISOString()
+    const baseRows = allItems.map((item) => ({
+      source_type: item.source_type,
+      source_name: item.source_name,
+      url: item.url,
+      title: item.title,
+      raw_content: item.raw_content ?? null,
+      published_at: item.published_at ?? null,
+      ingested_at: ingestedAt,
+      country_tags: item.country_tags,
+    }))
+
+    const rowsWithEngagement = baseRows.map((row, idx) => ({
+      ...row,
+      engagement_score: allItems[idx]?.engagement_score ?? 0,
+    }))
+
+    let { data, error } = await db
+      .from('raw_items')
+      .upsert(rowsWithEngagement, { onConflict: 'url', ignoreDuplicates: false })
+      .select('id')
+
+    const isMissingEngagementColumn =
+      error?.message?.includes("Could not find the 'engagement_score' column") ?? false
+
+    if (isMissingEngagementColumn) {
+      console.warn('[Ingest] raw_items.engagement_score missing; retrying upsert without it')
+      const retry = await db
+        .from('raw_items')
+        .upsert(baseRows, { onConflict: 'url', ignoreDuplicates: false })
+        .select('id')
+      data = retry.data
+      error = retry.error
+    }
 
     if (error) {
       console.error('[Ingest] Upsert failed:', error)
       errors.push(`DB upsert: ${error.message}`)
+    } else {
+      persisted = data?.length ?? 0
     }
   }
 
@@ -83,6 +108,7 @@ export async function runIngestion(): Promise<IngestResult> {
     search: searchItems.length,
     twitter: twitterItems.length,
     total: allItems.length,
+    persisted,
     errors,
   }
 }

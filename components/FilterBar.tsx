@@ -56,11 +56,11 @@ export default function FilterBar() {
   }
 
   return (
-    <div className="border-b sticky top-0 z-40 overflow-visible backdrop-blur-sm" style={{ borderColor: 'var(--rule)', background: 'rgba(250,247,240,0.95)' }}>
+    <div className="border-b sticky top-0 z-40 overflow-visible backdrop-blur-md shadow-[0_6px_20px_rgba(30,46,34,0.06)]" style={{ borderColor: 'var(--rule)', background: 'color-mix(in oklab, var(--parchment) 90%, white 10%)' }}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 overflow-visible">
         {/* Countries */}
-        <div className="flex flex-wrap items-center gap-2 py-2 overflow-visible">
-          <span className="text-xs font-medium shrink-0" style={{ color: 'var(--ink-soft)' }}>Country</span>
+        <div className="flex flex-wrap items-center gap-2 py-2.5 overflow-visible">
+          <span className="text-xs font-semibold shrink-0" style={{ color: 'var(--ink-soft)' }}>Country</span>
           <div className="w-px h-4 shrink-0" style={{ background: 'var(--rule)' }} />
           {COUNTRIES.map((c) =>
             c === 'rest_of_africa' ? (
@@ -154,8 +154,8 @@ export default function FilterBar() {
         <hr className="rule-single" />
 
         {/* Categories */}
-        <div className="flex flex-wrap items-center gap-2 py-2 overflow-visible">
-          <span className="text-xs font-medium shrink-0" style={{ color: 'var(--ink-soft)' }}>Topic</span>
+        <div className="flex flex-wrap items-center gap-2 py-2.5 overflow-visible">
+          <span className="text-xs font-semibold shrink-0" style={{ color: 'var(--ink-soft)' }}>Topic</span>
           <div className="w-px h-4 shrink-0" style={{ background: 'var(--rule)' }} />
           {CATEGORIES_PRIMARY.map((cat) => (
             <button

@@ -21,13 +21,13 @@ export default function DiscussionItem({ discussion }: { discussion: Discussion 
       href={discussion.url}
       target="_blank"
       rel="noopener noreferrer"
-      className="block rounded-lg border p-3.5 transition-colors hover:border-[var(--forest-light)] group"
-      style={{ borderColor: 'var(--rule)', background: 'white' }}
+      className="block rounded-xl border p-3.5 transition-all hover:border-[var(--forest-light)] hover:-translate-y-[1px] group"
+      style={{ borderColor: 'var(--rule)', background: 'var(--paper)' }}
     >
       <div className="flex items-start gap-2">
         <span className="text-base shrink-0 mt-0.5">{platformIcon(discussion.platform)}</span>
         <div className="min-w-0">
-          <p className="text-sm font-medium leading-snug line-clamp-2 group-hover:underline" style={{ color: 'var(--ink)' }}>
+          <p className="text-sm font-semibold leading-snug line-clamp-2 group-hover:underline" style={{ color: 'var(--ink)' }}>
             {discussion.title}
           </p>
           {discussion.excerpt && (

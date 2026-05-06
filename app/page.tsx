@@ -5,6 +5,7 @@ import type { Category } from '@/lib/types'
 import FilterBar from '@/components/FilterBar'
 import CategorySection from '@/components/CategorySection'
 import DiscussionsPanel from '@/components/DiscussionsPanel'
+import RunDigestButton from '@/components/RunDigestButton'
 
 export const revalidate = 1800 // 30 min
 
@@ -75,6 +76,7 @@ export default async function DigestPage({ searchParams }: Props) {
 
   const hasStories = stories.length > 0
   const hasDiscussions = discussions.length > 0
+  const activeCategoriesCount = orderedCategories.filter((cat) => (byCategory[cat]?.length ?? 0) > 0).length
 
   console.log('[DigestPage] Render digest', {
     params,
@@ -86,27 +88,38 @@ export default async function DigestPage({ searchParams }: Props) {
   })
 
   return (
-    <div className="min-h-screen" style={{ background: 'var(--parchment)' }}>
+    <div className="min-h-screen grain-overlay" style={{ background: 'var(--parchment)' }}>
       {/* Masthead */}
-      <header className="masthead-stripe text-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-5">
-          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
+      <header className="masthead-stripe text-white relative overflow-hidden">
+        <div className="absolute inset-x-0 -bottom-20 h-44 bg-gradient-to-t from-black/20 to-transparent" />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 pb-8 relative">
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
             <div>
-              <p className="text-xs font-medium tracking-widest uppercase opacity-70 mb-1">
+              <p className="text-[0.65rem] font-semibold tracking-[0.22em] uppercase opacity-75 mb-2">
                 Africa · Business · Intelligence
               </p>
-              <h1 className="font-display text-3xl sm:text-4xl font-bold tracking-tight">
+              <h1 className="font-display text-3xl sm:text-5xl font-bold tracking-tight drop-shadow-sm">
                 African Business Daily
               </h1>
+              <p className="text-sm mt-2.5 max-w-xl text-white/80">
+                Signal over noise: the continent&apos;s most discussed business moves, mapped by sector and momentum.
+              </p>
             </div>
-            <div className="text-right">
-              <p className="font-display text-sm opacity-80">{formatDate(new Date())}</p>
+            <div className="text-right rounded-xl p-3.5 border bg-black/20 backdrop-blur-sm" style={{ borderColor: 'rgba(255,255,255,0.24)' }}>
+              <p className="font-display text-sm text-white/85">{formatDate(new Date())}</p>
               {lastUpdated && (
-                <p className="text-xs opacity-60 mt-0.5">
+                <p className="text-xs text-white/70 mt-0.5">
                   Updated {formatTime(lastUpdated)}
                 </p>
               )}
+              <RunDigestButton />
             </div>
+          </div>
+          <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-2.5">
+            <KpiCard label="Stories" value={stories.length} />
+            <KpiCard label="Live Discussions" value={discussions.length} />
+            <KpiCard label="Active Sectors" value={activeCategoriesCount} />
+            <KpiCard label="Topical Breadth" value={`${Math.max(1, Math.min(100, stories.length * 3))}%`} />
           </div>
         </div>
       </header>
@@ -118,15 +131,15 @@ export default async function DigestPage({ searchParams }: Props) {
 
       {/* Main content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-8 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-8 items-start">
           {/* Stories */}
           <div>
             {hasStories ? (
               <>
                 {(fallbackTier && fallbackTier > 1) || usedCountryFallback ? (
                   <div
-                    className="mb-4 rounded-lg border px-3 py-2 text-xs"
-                    style={{ borderColor: 'var(--rule)', color: 'var(--ink-soft)' }}
+                    className="mb-5 rounded-xl border px-3.5 py-2.5 text-xs frost-panel"
+                    style={{ color: 'var(--ink-soft)' }}
                   >
                     Showing best available matches
                     {effectiveMinRelevance ? ` (relevance >= ${effectiveMinRelevance})` : ''}.
@@ -176,10 +189,19 @@ export default async function DigestPage({ searchParams }: Props) {
           <div className="flex items-center gap-4">
             <a href="/api/health" className="hover:underline">Status</a>
             <span>·</span>
-            <span>RSS/search ingest every 4h; full digest LLM twice daily (UTC)</span>
+            <span>Ingest + full digest once daily at 06:00 UTC</span>
           </div>
         </div>
       </footer>
+    </div>
+  )
+}
+
+function KpiCard({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-lg border px-3 py-2.5 bg-white/10 backdrop-blur-sm" style={{ borderColor: 'rgba(255,255,255,0.25)' }}>
+      <p className="text-[0.65rem] uppercase tracking-[0.18em] text-white/75">{label}</p>
+      <p className="font-display text-lg text-white">{value}</p>
     </div>
   )
 }
