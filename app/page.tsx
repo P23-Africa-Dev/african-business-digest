@@ -35,6 +35,7 @@ export default async function DigestPage({ searchParams }: Props) {
   const { category, country } = params
 
   let digest
+  
   try {
     digest = await getDigest({
       category,
