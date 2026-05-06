@@ -1,0 +1,77 @@
+@import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&display=swap');
+
+@import "tailwindcss";
+
+@theme {
+  --font-display: 'Libre Baskerville', Georgia, serif;
+  --font-sans: 'DM Sans', system-ui, sans-serif;
+}
+
+:root {
+  --forest: #0d3321;
+  --forest-mid: #1a5236;
+  --forest-light: #2d7a4f;
+  --amber: #c97c1a;
+  --amber-light: #e8960e;
+  --amber-pale: #fdf3e0;
+  --parchment: #faf7f0;
+  --ink: #1a1209;
+  --ink-mid: #3d2f1a;
+  --ink-soft: #6b5a3e;
+  --rule: #e0d5c0;
+  --rule-light: #f0ead8;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+
+body {
+  background-color: var(--parchment);
+  color: var(--ink);
+  font-family: 'DM Sans', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  background-image:
+    radial-gradient(ellipse at 20% 0%, rgba(13,51,33,0.04) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 100%, rgba(201,124,26,0.04) 0%, transparent 50%);
+  min-height: 100vh;
+}
+
+.font-display { font-family: 'Libre Baskerville', Georgia, serif; }
+
+.rule-double {
+  border: none;
+  border-top: 3px double var(--forest);
+  opacity: 0.6;
+}
+.rule-single {
+  border: none;
+  border-top: 1px solid var(--rule);
+}
+
+.story-card {
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+.story-card:hover {
+  box-shadow: 0 4px 24px rgba(13,51,33,0.08);
+  transform: translateY(-1px);
+}
+
+.masthead-stripe {
+  background: linear-gradient(135deg, var(--forest) 0%, var(--forest-mid) 60%, var(--forest-light) 100%);
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg, var(--rule-light) 25%, var(--rule) 50%, var(--rule-light) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes pulse-new {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+.badge-new { animation: pulse-new 2.5s ease-in-out infinite; }
