@@ -36,7 +36,7 @@ export async function getDigest(params: {
   const category = isCategoryParam(params.category) ? params.category : undefined
   const country = params.country && isValidCountryFilter(params.country) ? params.country : undefined
   const storiesCutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
-  const discussionsCutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
+  const discussionsCutoff = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString()
 
   const relevanceTiers = Array.from(
     new Set([minRelevance, 20, 10].filter((v) => Number.isFinite(v) && v >= 10))

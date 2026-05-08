@@ -15,20 +15,24 @@ interface SearchQuery {
 }
 
 const SEARCH_QUERIES: SearchQuery[] = [
-  { q: '"African fintech" funding 2024 OR 2025', countryTags: ['rest_of_africa'] },
-  { q: '"Nigerian startup" funding OR launch', countryTags: ['nigeria'] },
-  { q: '"Kenya tech" investment OR startup', countryTags: ['kenya'] },
-  { q: '"South Africa" business news startup', countryTags: ['south_africa'] },
-  { q: '"Egyptian startup" OR "Egypt tech" funding', countryTags: ['egypt'] },
-  { q: '"Ghana business" OR "Ghanaian startup"', countryTags: ['ghana'] },
-  { q: '"Morocco" startup OR fintech OR tech', countryTags: ['morocco'] },
-  { q: 'African logistics supply chain 2025', countryTags: ['rest_of_africa'] },
-  { q: 'African energy renewable investment 2025', countryTags: ['rest_of_africa'] },
-  { q: 'Africa deals funding acquisition 2025', countryTags: ['rest_of_africa'] },
-  { q: 'Ethiopia business economy startup 2025', countryTags: ['ethiopia'] },
-  { q: 'Tanzania business investment 2025', countryTags: ['tanzania'] },
-  { q: 'Uganda startup fintech 2025', countryTags: ['uganda'] },
-  { q: 'Senegal business economy startup', countryTags: ['senegal'] },
+  { q: '"African fintech" funding discussion OR analysis', countryTags: ['rest_of_africa'] },
+  { q: '"Nigerian startup" funding analysis OR commentary', countryTags: ['nigeria'] },
+  { q: '"Kenya tech" investment discussion OR forum', countryTags: ['kenya'] },
+  { q: '"South Africa" business analysis startup ecosystem', countryTags: ['south_africa'] },
+  { q: '"Egyptian startup" funding analysis OR policy', countryTags: ['egypt'] },
+  { q: '"Ghana business" startup discussion OR economy analysis', countryTags: ['ghana'] },
+  { q: '"Morocco" startup fintech discussion OR analysis', countryTags: ['morocco'] },
+  { q: 'African logistics supply chain analysis discussion', countryTags: ['rest_of_africa'] },
+  { q: 'African energy renewable investment commentary', countryTags: ['rest_of_africa'] },
+  { q: 'Africa deals funding acquisition analysis', countryTags: ['rest_of_africa'] },
+  { q: 'Ethiopia business startup discussion analysis', countryTags: ['ethiopia'] },
+  { q: 'Tanzania business investment analysis discussion', countryTags: ['tanzania'] },
+  { q: 'Uganda startup fintech discussion analysis', countryTags: ['uganda'] },
+  { q: 'Senegal business economy startup analysis', countryTags: ['senegal'] },
+  { q: 'site:reddit.com africa business startup', countryTags: ['rest_of_africa'] },
+  { q: 'site:x.com africa fintech startup', countryTags: ['rest_of_africa'] },
+  { q: 'site:linkedin.com africa startup funding', countryTags: ['rest_of_africa'] },
+  { q: 'site:techcabal.com africa startup analysis', countryTags: ['rest_of_africa'] },
 ]
 
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000
@@ -36,7 +40,9 @@ const cache = new Map<string, { data: RawItem[]; expiresAt: number }>()
 
 function queriesForThisRun(): SearchQuery[] {
   const chunk = Math.floor(Date.now() / (4 * 60 * 60 * 1000)) % 3
-  return SEARCH_QUERIES.filter((_, i) => i % 3 === chunk)
+  const selected = SEARCH_QUERIES.filter((_, i) => i % 3 === chunk)
+  console.log('[Search] Query rotation', { chunk, selected: selected.length, total: SEARCH_QUERIES.length })
+  return selected
 }
 
 async function braveSearch(query: string): Promise<BraveResult[]> {

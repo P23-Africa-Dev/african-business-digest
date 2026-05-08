@@ -3,6 +3,136 @@ import { createServerClient } from '@/lib/db/client'
 import { LLM_COUNTRY_TAG_HINTS } from '@/lib/regions'
 import { DiscussionFilterSchema } from './schemas'
 import { recordUsage } from './budget'
+import type { SourceType } from '@/lib/types'
+
+const DB_SAFE_CATEGORIES = new Set([
+  'fintech',
+  'logistics',
+  'energy',
+  'retail',
+  'deals_funding',
+  'policy',
+  'business_failures',
+])
+const CATEGORY_FALLBACK_MAP: Record<string, string> = {
+  agriculture: 'retail',
+  consumer_markets: 'retail',
+  infrastructure: 'logistics',
+}
+
+function toDbSafeCategory(category: string | null | undefined): string | null {
+  if (!category) return null
+  if (DB_SAFE_CATEGORIES.has(category)) return category
+  return CATEGORY_FALLBACK_MAP[category] ?? 'policy'
+}
+
+const DISCUSSION_SOURCE_TYPES: SourceType[] = ['news', 'reddit', 'search', 'twitter', 'youtube']
+const LEGACY_DISCUSSION_SOURCE_TYPES: SourceType[] = ['news', 'reddit', 'search']
+const BUSINESS_SIGNAL_TERMS = [
+  'startup',
+  'funding',
+  'investment',
+  'fintech',
+  'bank',
+  'acquisition',
+  'merger',
+  'market',
+  'ipo',
+  'economy',
+  'policy',
+  'regulation',
+  'logistics',
+  'infrastructure',
+  'retail',
+  'energy',
+  'profit',
+  'revenue',
+  'deal',
+  'venture',
+]
+const DISCUSSION_PREFERRED_DOMAINS = [
+  'techcabal.com',
+  'businessday.ng',
+  'disruptafrica.com',
+  'venturesafrica.com',
+  'theafricareport.com',
+  'semafor.com',
+  'restofworld.org',
+  'itnewsafrica.com',
+  'reddit.com',
+  'x.com',
+  'twitter.com',
+]
+const MAX_CANDIDATES_FOR_LLM = 100
+
+type DiscussionCandidate = {
+  id: string
+  url: string
+  title: string
+  raw_content: string | null
+  source_type: SourceType
+  source_name: string
+  country_tags: string[]
+  published_at: string | null
+  engagement_score: number
+}
+
+export type DiscussionProcessStats = {
+  cutoffIso: string
+  candidateCount: number
+  candidatesBySource: Record<string, number>
+  prefilteredCount: number
+  prefilteredBySource: Record<string, number>
+  llmReturnedCount: number
+  relevantCount: number
+  upsertedCount: number
+  upsertError: string | null
+}
+
+export type DiscussionProcessResult = {
+  processedCount: number
+  stats: DiscussionProcessStats
+}
+
+type DiscussionProcessSnapshot = {
+  updatedAt: string
+  stats: DiscussionProcessStats
+}
+
+let lastDiscussionProcessSnapshot: DiscussionProcessSnapshot | null = null
+
+export function getLastDiscussionProcessSnapshot(): DiscussionProcessSnapshot | null {
+  return lastDiscussionProcessSnapshot
+}
+
+function toSourceCounts(rows: Array<{ source_type: string }>): Record<string, number> {
+  return rows.reduce<Record<string, number>>((acc, row) => {
+    acc[row.source_type] = (acc[row.source_type] ?? 0) + 1
+    return acc
+  }, {})
+}
+
+function scoreDiscussionCandidate(candidate: DiscussionCandidate): number {
+  const blob = `${candidate.title} ${candidate.raw_content ?? ''}`.toLowerCase()
+  let score = 0
+  for (const term of BUSINESS_SIGNAL_TERMS) {
+    if (blob.includes(term)) score += 2
+  }
+  if ((candidate.engagement_score ?? 0) > 0) score += Math.min(8, Math.ceil(candidate.engagement_score / 10))
+  if (candidate.source_type === 'reddit') score += 4
+  if (candidate.source_type === 'search') score += 2
+  if (candidate.source_type === 'news') score += 1
+  if (
+    DISCUSSION_PREFERRED_DOMAINS.some((domain) => {
+      const source = candidate.source_name.toLowerCase()
+      const url = candidate.url.toLowerCase()
+      return source.includes(domain) || url.includes(domain)
+    })
+  ) {
+    score += 2
+  }
+  return score
+}
 
 const SYSTEM_PROMPT = `You are a filter for African business discussions online.
 
@@ -17,24 +147,75 @@ For each item return:
 
 Return valid JSON only: { "discussions": [ { "index": 0, "is_business_relevant": true, ... }, ... ] }`
 
-export async function processDiscussions(): Promise<number> {
+export async function processDiscussions(): Promise<DiscussionProcessResult> {
   const db = createServerClient()
   // Haiku for this lighter filtering pass — ~5x cheaper than Sonnet
   const client = new Anthropic()
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  const baseStats: DiscussionProcessStats = {
+    cutoffIso: cutoff,
+    candidateCount: 0,
+    candidatesBySource: {},
+    prefilteredCount: 0,
+    prefilteredBySource: {},
+    llmReturnedCount: 0,
+    relevantCount: 0,
+    upsertedCount: 0,
+    upsertError: null,
+  }
 
-  const { data: rawItems } = await db
+  let rawItemsQuery = await db
     .from('raw_items')
     .select('id, url, title, raw_content, source_type, source_name, country_tags, published_at, engagement_score')
-    .in('source_type', ['reddit', 'search'])
+    .in('source_type', DISCUSSION_SOURCE_TYPES)
     .gte('ingested_at', cutoff)
     .order('ingested_at', { ascending: false })
-    .limit(100)
+    .limit(300)
+  if (rawItemsQuery.error) {
+    const maybeEnumMismatch =
+      rawItemsQuery.error.code === '22P02' &&
+      rawItemsQuery.error.message?.toLowerCase().includes('source_type_enum')
+    if (maybeEnumMismatch) {
+      rawItemsQuery = await db
+        .from('raw_items')
+        .select('id, url, title, raw_content, source_type, source_name, country_tags, published_at, engagement_score')
+        .in('source_type', LEGACY_DISCUSSION_SOURCE_TYPES)
+        .gte('ingested_at', cutoff)
+        .order('ingested_at', { ascending: false })
+        .limit(300)
+    }
+  }
+  if (rawItemsQuery.error) {
+    baseStats.upsertError = `candidate_query_failed: ${rawItemsQuery.error.message}`
+    lastDiscussionProcessSnapshot = { updatedAt: new Date().toISOString(), stats: baseStats }
+    return { processedCount: 0, stats: baseStats }
+  }
 
-  if (!rawItems || rawItems.length === 0) return 0
+  const rawCandidates = ((rawItemsQuery.data ?? []) as DiscussionCandidate[])
+  baseStats.candidateCount = rawCandidates.length
+  baseStats.candidatesBySource = toSourceCounts(rawCandidates)
+  if (rawCandidates.length === 0) {
+    lastDiscussionProcessSnapshot = { updatedAt: new Date().toISOString(), stats: baseStats }
+    return { processedCount: 0, stats: baseStats }
+  }
+
+  const scored = rawCandidates
+    .map((item) => ({ item, score: scoreDiscussionCandidate(item) }))
+    .sort((a, b) => b.score - a.score)
+  const prefilteredItems = scored
+    .filter(({ score }, idx) => score >= 2 || idx < 20)
+    .slice(0, MAX_CANDIDATES_FOR_LLM)
+    .map(({ item }) => item)
+
+  baseStats.prefilteredCount = prefilteredItems.length
+  baseStats.prefilteredBySource = toSourceCounts(prefilteredItems)
+  if (prefilteredItems.length === 0) {
+    lastDiscussionProcessSnapshot = { updatedAt: new Date().toISOString(), stats: baseStats }
+    return { processedCount: 0, stats: baseStats }
+  }
 
   // Use index instead of URL — Claude often drops or mutates URLs in responses
-  const itemsForLLM = rawItems.map((item, idx) => ({
+  const itemsForLLM = prefilteredItems.map((item, idx) => ({
     index: idx,
     title: item.title,
     snippet: item.raw_content?.slice(0, 500) ?? null,
@@ -51,7 +232,7 @@ export async function processDiscussions(): Promise<number> {
       messages: [
         {
           role: 'user',
-          content: `Filter and tag these ${rawItems.length} items:\n\n${JSON.stringify(itemsForLLM, null, 2)}\n\nReturn JSON: { "discussions": [...] }`,
+          content: `Filter and tag these ${prefilteredItems.length} items:\n\n${JSON.stringify(itemsForLLM, null, 2)}\n\nReturn JSON: { "discussions": [...] }`,
         },
       ],
     })
@@ -63,15 +244,22 @@ export async function processDiscussions(): Promise<number> {
     parsed = DiscussionFilterSchema.parse(JSON.parse(jsonStr))
   } catch (err) {
     console.error('[Discussions] LLM processing failed:', err)
-    return 0
+    baseStats.upsertError = err instanceof Error ? err.message : String(err)
+    lastDiscussionProcessSnapshot = { updatedAt: new Date().toISOString(), stats: baseStats }
+    return { processedCount: 0, stats: baseStats }
   }
 
+  baseStats.llmReturnedCount = parsed.discussions.length
   const relevant = parsed.discussions.filter((d) => d.is_business_relevant)
-  if (relevant.length === 0) return 0
+  baseStats.relevantCount = relevant.length
+  if (relevant.length === 0) {
+    lastDiscussionProcessSnapshot = { updatedAt: new Date().toISOString(), stats: baseStats }
+    return { processedCount: 0, stats: baseStats }
+  }
 
   const toInsert = relevant
     .map((d) => {
-      const rawItem = rawItems[d.index]
+      const rawItem = prefilteredItems[d.index]
       if (!rawItem) return null
       return {
         platform: rawItem.source_name ?? 'unknown',
@@ -80,7 +268,7 @@ export async function processDiscussions(): Promise<number> {
         excerpt: d.excerpt ?? null,
         engagement_score: Math.min(100, Math.max(0, Number(rawItem.engagement_score) || 0)),
         country_tags: d.country_tags,
-        category: d.category,
+        category: toDbSafeCategory(d.category),
         posted_at: rawItem.published_at ?? null,
         ingested_at: new Date().toISOString(),
       }
@@ -93,8 +281,12 @@ export async function processDiscussions(): Promise<number> {
 
   if (error) {
     console.error('[Discussions] Upsert failed:', error)
-    return 0
+    baseStats.upsertError = error.message
+    lastDiscussionProcessSnapshot = { updatedAt: new Date().toISOString(), stats: baseStats }
+    return { processedCount: 0, stats: baseStats }
   }
 
-  return relevant.length
+  baseStats.upsertedCount = toInsert.length
+  lastDiscussionProcessSnapshot = { updatedAt: new Date().toISOString(), stats: baseStats }
+  return { processedCount: relevant.length, stats: baseStats }
 }

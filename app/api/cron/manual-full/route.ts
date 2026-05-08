@@ -11,23 +11,6 @@ export const maxDuration = 300
 
 export async function POST() {
   const db = createServerClient()
-
-  // Check if already ran today (UTC)
-  const { data } = await db
-    .from('raw_items')
-    .select('ingested_at')
-    .order('ingested_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
-  const lastRunAt = data?.ingested_at ?? null
-  const todayUtc = new Date().toISOString().slice(0, 10)
-  const ranToday = lastRunAt ? new Date(lastRunAt).toISOString().slice(0, 10) === todayUtc : false
-
-  if (ranToday) {
-    return NextResponse.json({ error: 'Already ran today', lastRunAt }, { status: 409 })
-  }
-
   const start = Date.now()
 
   async function tableCounts() {

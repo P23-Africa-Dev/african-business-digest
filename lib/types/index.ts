@@ -1,4 +1,4 @@
-export type SourceType = 'news' | 'reddit' | 'search'
+export type SourceType = 'news' | 'reddit' | 'search' | 'twitter' | 'youtube'
 export type StoryStatus = 'new' | 'developing' | 'fading'
 export type Category =
   | 'fintech'

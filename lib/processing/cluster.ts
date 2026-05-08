@@ -5,6 +5,25 @@ import { ClusterResponseSchema } from './schemas'
 import { recordUsage } from './budget'
 
 const BATCH_SIZE = 50
+const DB_SAFE_CATEGORIES = new Set([
+  'fintech',
+  'logistics',
+  'energy',
+  'retail',
+  'deals_funding',
+  'policy',
+  'business_failures',
+])
+const CATEGORY_FALLBACK_MAP: Record<string, string> = {
+  agriculture: 'retail',
+  consumer_markets: 'retail',
+  infrastructure: 'logistics',
+}
+
+function toDbSafeCategory(category: string): string {
+  if (DB_SAFE_CATEGORIES.has(category)) return category
+  return CATEGORY_FALLBACK_MAP[category] ?? 'policy'
+}
 
 const SYSTEM_PROMPT = `You are an expert African business news analyst. Your task is to cluster raw news items into coherent stories and produce a structured digest.
 
@@ -126,7 +145,7 @@ export async function clusterRawItems(): Promise<number> {
         .insert({
           headline: story.headline,
           summary: story.summary,
-          category: story.category,
+          category: toDbSafeCategory(story.category),
           country_tags: story.country_tags,
           relevance_score: story.relevance_score,
           status: 'new',

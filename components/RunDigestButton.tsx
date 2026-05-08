@@ -28,13 +28,13 @@ export default function RunDigestButton() {
       .catch(() => setStatus('error'))
   }, [])
 
-  async function handleRun() {
+  async function runCron(path: string, opts?: { ignore409?: boolean; successPrefix?: string }) {
     setStatus('running')
     setNote(null)
     try {
-      const res = await fetch('/api/cron/trigger', { method: 'POST' })
+      const res = await fetch(path, { method: 'POST' })
       const body = await res.json().catch(() => null)
-      if (res.status === 409) {
+      if (res.status === 409 && !opts?.ignore409) {
         setLastRunAt(body.lastRunAt ?? null)
         setStatus('ran')
         return
@@ -50,7 +50,7 @@ export default function RunDigestButton() {
         setLastRunAt(new Date().toISOString())
         setStatus('done')
         setNote(
-          `Added ${body?.storiesCreated ?? 0} stories from ${body?.ingestResult?.persisted ?? 0} ingested items`
+          `${opts?.successPrefix ?? 'Added'} ${body?.storiesCreated ?? 0} stories from ${body?.ingestResult?.persisted ?? 0} ingested items`
         )
         // Give Next.js a moment to finish revalidation, then hard-reload
         setTimeout(() => window.location.reload(), 1500)
@@ -65,13 +65,25 @@ export default function RunDigestButton() {
     }
   }
 
+  async function handleRun() {
+    await runCron('/api/cron/trigger')
+  }
+
+  async function handleFullRun() {
+    await runCron('/api/cron/manual-full', {
+      ignore409: true,
+      successPrefix: 'Full trigger added',
+    })
+  }
+
   if (status === 'loading') {
     return (
       <div className="mt-2 h-7 w-32 animate-pulse rounded" style={{ background: 'rgba(255,255,255,0.15)' }} />
     )
   }
 
-  const disabled = status === 'ran' || status === 'running' || status === 'done'
+  const runDisabled = status === 'ran' || status === 'running' || status === 'done'
+  const fullRunDisabled = status === 'running'
 
   const label =
     status === 'running'
@@ -86,22 +98,38 @@ export default function RunDigestButton() {
 
   return (
     <div className="mt-2 flex flex-col items-end gap-0.5">
-      <button
-        onClick={handleRun}
-        disabled={disabled}
-        className="rounded-md px-3 py-1.5 text-xs font-semibold transition-all"
-        style={{
-          background: disabled ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.92)',
-          color: disabled ? 'rgba(255,255,255,0.55)' : 'var(--forest)',
-          cursor: disabled ? 'not-allowed' : 'pointer',
-          border: disabled ? '1px solid rgba(255,255,255,0.18)' : '1px solid rgba(255,255,255,0.82)',
-        }}
-      >
-        {status === 'running' && (
-          <span className="mr-1.5 inline-block h-2.5 w-2.5 animate-spin rounded-full border border-emerald-300/50 border-t-emerald-800/90" />
-        )}
-        {label}
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={handleRun}
+          disabled={runDisabled}
+          className="rounded-md px-3 py-1.5 text-xs font-semibold transition-all"
+          style={{
+            background: runDisabled ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.92)',
+            color: runDisabled ? 'rgba(255,255,255,0.55)' : 'var(--forest)',
+            cursor: runDisabled ? 'not-allowed' : 'pointer',
+            border: runDisabled ? '1px solid rgba(255,255,255,0.18)' : '1px solid rgba(255,255,255,0.82)',
+          }}
+        >
+          {status === 'running' && (
+            <span className="mr-1.5 inline-block h-2.5 w-2.5 animate-spin rounded-full border border-emerald-300/50 border-t-emerald-800/90" />
+          )}
+          {label}
+        </button>
+        <button
+          onClick={handleFullRun}
+          disabled={fullRunDisabled}
+          className="rounded-md px-3 py-1.5 text-xs font-semibold transition-all"
+          style={{
+            background: fullRunDisabled ? 'rgba(255,255,255,0.14)' : 'rgba(19,102,74,0.95)',
+            color: fullRunDisabled ? 'rgba(255,255,255,0.55)' : 'white',
+            cursor: fullRunDisabled ? 'not-allowed' : 'pointer',
+            border: fullRunDisabled ? '1px solid rgba(255,255,255,0.18)' : '1px solid rgba(19,102,74,0.92)',
+          }}
+          title="Run full digest pipeline now (bypass once-per-day guard)"
+        >
+          Run full trigger
+        </button>
+      </div>
       {lastRunAt && (status === 'ran' || status === 'done') && (
         <span className="text-[10px] opacity-50">last ran {formatTime(lastRunAt)}</span>
       )}

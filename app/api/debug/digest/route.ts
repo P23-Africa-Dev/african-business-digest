@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getDigest } from '@/lib/db/queries'
 import { createServerClient } from '@/lib/db/client'
 import type { Category } from '@/lib/types'
+import { getLastDiscussionProcessSnapshot } from '@/lib/processing/discussions'
 
 export async function GET(req: Request) {
   const url = new URL(req.url)
@@ -35,6 +36,25 @@ export async function GET(req: Request) {
     db.from('stories').select('id, first_seen_at, last_updated_at').order('first_seen_at', { ascending: false }).limit(1).maybeSingle(),
     db.from('discussions').select('id, ingested_at, posted_at').order('ingested_at', { ascending: false }).limit(1).maybeSingle(),
   ])
+  let discussionCandidates24hResult = await db
+    .from('raw_items')
+    .select('source_type')
+    .in('source_type', ['news', 'reddit', 'search', 'twitter', 'youtube'])
+    .gte('ingested_at', cutoff24h)
+    .limit(2000)
+  if (discussionCandidates24hResult.error) {
+    const maybeEnumMismatch =
+      discussionCandidates24hResult.error.code === '22P02' &&
+      discussionCandidates24hResult.error.message?.toLowerCase().includes('source_type_enum')
+    if (maybeEnumMismatch) {
+      discussionCandidates24hResult = await db
+        .from('raw_items')
+        .select('source_type')
+        .in('source_type', ['news', 'reddit', 'search'])
+        .gte('ingested_at', cutoff24h)
+        .limit(2000)
+    }
+  }
 
   const dbErrors = {
     rawItems24h: rawItems24hResult.error?.message ?? null,
@@ -46,7 +66,18 @@ export async function GET(req: Request) {
     latestRaw: latestRawResult.error?.message ?? null,
     latestStory: latestStoryResult.error?.message ?? null,
     latestDiscussion: latestDiscussionResult.error?.message ?? null,
+    discussionCandidates24h: discussionCandidates24hResult.error?.message ?? null,
   }
+
+  const candidatesBySource24h = (discussionCandidates24hResult.data ?? []).reduce<Record<string, number>>(
+    (acc, row) => {
+      const sourceType = row.source_type ?? 'unknown'
+      acc[sourceType] = (acc[sourceType] ?? 0) + 1
+      return acc
+    },
+    {}
+  )
+  const discussionSnapshot = getLastDiscussionProcessSnapshot()
 
   let digestSummary: {
     stories: number
@@ -103,11 +134,24 @@ export async function GET(req: Request) {
         last24h: discussions24hResult.count ?? 0,
         last48h: discussions48hResult.count ?? 0,
       },
+      discussionCandidates24h: {
+        total: (discussionCandidates24hResult.data ?? []).length,
+        bySource: candidatesBySource24h,
+      },
     },
     latest: {
       rawItem: latestRawResult.data ?? null,
       story: latestStoryResult.data ?? null,
       discussion: latestDiscussionResult.data ?? null,
+    },
+    diagnostics: {
+      acceptedDiscussionsLast24h: discussions24hResult.count ?? 0,
+      latestSuccessfulDiscussionAt: latestDiscussionResult.data?.ingested_at ?? null,
+      likelyStarved:
+        (discussionCandidates24hResult.data ?? []).length > 0 && (discussions24hResult.count ?? 0) === 0,
+      lastRunProcessingStats: discussionSnapshot?.stats ?? null,
+      lastRunProcessingStatsUpdatedAt: discussionSnapshot?.updatedAt ?? null,
+      upsertErrorSummary: discussionSnapshot?.stats.upsertError ?? null,
     },
     digest: digestSummary,
     errors: dbErrors,

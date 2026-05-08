@@ -4,7 +4,9 @@ const HOUR_MS = 3_600_000
 const DAY_MS = 24 * HOUR_MS
 
 export function discussionEffectiveAt(d: { posted_at?: string | null; ingested_at: string }): number {
-  return new Date(d.posted_at ?? d.ingested_at).getTime()
+  const postedMs = d.posted_at ? new Date(d.posted_at).getTime() : Number.NaN
+  const ingestedMs = new Date(d.ingested_at).getTime()
+  return Number.isFinite(postedMs) ? Math.max(postedMs, ingestedMs) : ingestedMs
 }
 
 export function rankDiscussionsForDigest(

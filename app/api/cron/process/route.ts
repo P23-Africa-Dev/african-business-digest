@@ -93,8 +93,20 @@ export async function GET(req: Request) {
 
     console.log('[Cron] Processing discussions...')
     const t3 = Date.now()
-    const discussionsProcessed = await processDiscussions()
-    log.discussions = { discussionsProcessed, ms: Date.now() - t3 }
+    const discussionResult = await processDiscussions()
+    const discussionAlerts: string[] = []
+    if (discussionResult.stats.candidateCount > 0 && discussionResult.processedCount === 0) {
+      discussionAlerts.push('Discussion candidates found but zero discussions were accepted/inserted.')
+    }
+    if (discussionResult.stats.upsertError) {
+      discussionAlerts.push(`Discussion upsert error: ${discussionResult.stats.upsertError}`)
+    }
+    log.discussions = {
+      discussionsProcessed: discussionResult.processedCount,
+      stats: discussionResult.stats,
+      alerts: discussionAlerts,
+      ms: Date.now() - t3,
+    }
     log.countsAfterDiscussions = await tableCounts()
     console.log('[Cron] Discussions complete:', log.discussions)
     console.log('[Cron] Counts after discussions:', log.countsAfterDiscussions)
