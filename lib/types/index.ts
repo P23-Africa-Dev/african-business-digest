@@ -1,5 +1,6 @@
 export type SourceType = 'news' | 'reddit' | 'search' | 'twitter' | 'youtube'
 export type StoryStatus = 'new' | 'developing' | 'fading'
+export type SavedItemType = 'story' | 'discussion'
 export type Category =
   | 'fintech'
   | 'logistics'
@@ -128,4 +129,27 @@ export interface DigestData {
     usedCountryFallback: boolean
     count: number
   }>
+}
+
+export interface SavedItem {
+  id: string
+  item_type: SavedItemType
+  story_id?: string | null
+  discussion_id?: string | null
+  title_snapshot: string
+  url_snapshot: string | null
+  category_snapshot?: Category | null
+  country_tags_snapshot: string[]
+  created_at: string
+}
+
+export interface SaveItemPayload {
+  itemType: SavedItemType
+  itemId: string
+}
+
+export interface SavedFilters {
+  type?: 'all' | SavedItemType
+  category?: string
+  country?: string
 }

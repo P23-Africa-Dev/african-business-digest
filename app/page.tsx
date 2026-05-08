@@ -1,5 +1,6 @@
 import { Suspense } from 'react'
 import { getDigest } from '@/lib/db/queries'
+import { getSavedLookup } from '@/lib/db/saved'
 import { CATEGORIES } from '@/lib/types'
 import type { Category } from '@/lib/types'
 import FilterBar from '@/components/FilterBar'
@@ -77,6 +78,18 @@ export default async function DigestPage({ searchParams }: Props) {
   const hasStories = stories.length > 0
   const hasDiscussions = discussions.length > 0
   const activeCategoriesCount = orderedCategories.filter((cat) => (byCategory[cat]?.length ?? 0) > 0).length
+  let savedStoryIds: string[] = []
+  let savedDiscussionIds: string[] = []
+  try {
+    const savedLookup = await getSavedLookup({
+      storyIds: stories.map((s) => s.id),
+      discussionIds: discussions.map((d) => d.id),
+    })
+    savedStoryIds = savedLookup.storyIds
+    savedDiscussionIds = savedLookup.discussionIds
+  } catch (err) {
+    console.warn('[DigestPage] Failed to load saved lookup', err)
+  }
 
   console.log('[DigestPage] Render digest', {
     params,
@@ -153,6 +166,7 @@ export default async function DigestPage({ searchParams }: Props) {
                     key={cat}
                     category={cat}
                     stories={byCategory[cat] ?? []}
+                    savedStoryIds={savedStoryIds}
                   />
                 ))}
               </>
@@ -166,14 +180,14 @@ export default async function DigestPage({ searchParams }: Props) {
 
           {/* Discussions — desktop sidebar */}
           <div className="hidden lg:block">
-            <DiscussionsPanel discussions={discussions} />
+            <DiscussionsPanel discussions={discussions} savedDiscussionIds={savedDiscussionIds} />
           </div>
         </div>
 
         {/* Discussions — mobile (below stories) */}
         {hasDiscussions ? (
           <div className="lg:hidden mt-10">
-            <DiscussionsPanel discussions={discussions} />
+            <DiscussionsPanel discussions={discussions} savedDiscussionIds={savedDiscussionIds} />
           </div>
         ) : null}
 
@@ -187,6 +201,8 @@ export default async function DigestPage({ searchParams }: Props) {
             {' '}— Aggregated from TechCabal, Disrupt Africa, BusinessDay, Ventures Africa, and more.
           </div>
           <div className="flex items-center gap-4">
+            <a href="/saved" className="hover:underline">Saved</a>
+            <span>·</span>
             <a href="/api/health" className="hover:underline">Status</a>
             <span>·</span>
             <span>Ingest + full digest once daily at 06:00 UTC</span>

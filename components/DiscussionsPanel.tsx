@@ -1,7 +1,14 @@
 import DiscussionItem from './DiscussionItem'
 import type { Discussion } from '@/lib/types'
 
-export default function DiscussionsPanel({ discussions }: { discussions: Discussion[] }) {
+export default function DiscussionsPanel({
+  discussions,
+  savedDiscussionIds = [],
+}: {
+  discussions: Discussion[]
+  savedDiscussionIds?: string[]
+}) {
+  const savedSet = new Set(savedDiscussionIds)
   return (
     <aside aria-label="What people are discussing">
       <div className="sticky top-[96px] rounded-2xl p-4 frost-panel">
@@ -20,7 +27,7 @@ export default function DiscussionsPanel({ discussions }: { discussions: Discuss
         ) : (
           <div className="flex flex-col gap-2">
             {discussions.map((d) => (
-              <DiscussionItem key={d.id} discussion={d} />
+              <DiscussionItem key={d.id} discussion={d} isSaved={savedSet.has(d.id)} />
             ))}
           </div>
         )}

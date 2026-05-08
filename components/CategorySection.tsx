@@ -18,9 +18,11 @@ const CATEGORY_ICONS: Record<Category, string> = {
 interface Props {
   category: Category
   stories: Story[]
+  savedStoryIds?: string[]
 }
 
-export default function CategorySection({ category, stories }: Props) {
+export default function CategorySection({ category, stories, savedStoryIds = [] }: Props) {
+  const savedSet = new Set(savedStoryIds)
   return (
     <section aria-labelledby={`cat-${category}`} className="mb-11">
       <div className="flex items-center gap-2.5 mb-4">
@@ -48,7 +50,7 @@ export default function CategorySection({ category, stories }: Props) {
       ) : (
         <div className="grid gap-3">
           {stories.map((story) => (
-            <StoryCard key={story.id} story={story} />
+            <StoryCard key={story.id} story={story} isSaved={savedSet.has(story.id)} />
           ))}
         </div>
       )}

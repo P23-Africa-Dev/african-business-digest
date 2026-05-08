@@ -1,10 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import { ExternalLink, ChevronDown, ChevronUp } from 'lucide-react'
+import { ExternalLink, ChevronDown, ChevronUp, Bookmark, Trash2 } from 'lucide-react'
 import type { Story } from '@/lib/types'
 import { CATEGORY_LABELS } from '@/lib/types'
 import { flagAndLabelForCountryTag } from '@/lib/regions'
+import ConfirmActionModal from './ConfirmActionModal'
 
 function formatAge(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime()
@@ -16,10 +17,16 @@ function formatAge(dateStr: string): string {
 
 interface Props {
   story: Story
+  isSaved?: boolean
+  onSavedChange?: (saved: boolean) => void
 }
 
-export default function StoryCard({ story }: Props) {
+export default function StoryCard({ story, isSaved = false, onSavedChange }: Props) {
   const [sourcesOpen, setSourcesOpen] = useState(false)
+  const [saved, setSaved] = useState(isSaved)
+  const [saveModalOpen, setSaveModalOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
   const sources = story.sources ?? []
   const countryDisplay = story.country_tags
     .map((tag) => ({ tag, meta: flagAndLabelForCountryTag(tag) }))
@@ -31,7 +38,55 @@ export default function StoryCard({ story }: Props) {
   const isNew = story.status === 'new'
   const isDeveloping = story.status === 'developing'
 
+  async function saveStory() {
+    setSaving(true)
+    setNotice(null)
+    try {
+      const res = await fetch('/api/saved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemType: 'story', itemId: story.id }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        throw new Error(body?.error ?? 'Save failed')
+      }
+      setSaved(true)
+      onSavedChange?.(true)
+      setNotice('Saved to briefcase')
+      setSaveModalOpen(false)
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : 'Save failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function removeStory() {
+    setSaving(true)
+    setNotice(null)
+    try {
+      const res = await fetch('/api/saved', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemType: 'story', itemId: story.id }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        throw new Error(body?.error ?? 'Remove failed')
+      }
+      setSaved(false)
+      onSavedChange?.(false)
+      setNotice('Removed from briefcase')
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : 'Remove failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
+    <>
     <article
       className="story-card rounded-xl border p-5 md:p-6"
       style={{ borderColor: 'var(--rule)' }}
@@ -83,7 +138,7 @@ export default function StoryCard({ story }: Props) {
         ))}
 
         {/* Age */}
-          <span className="font-medium" style={{ color: 'var(--fading-text)', marginLeft: 'auto' }}>
+          <span className="font-medium" style={{ color: 'var(--fading-text)' }}>
           {story.last_updated_at !== story.first_seen_at &&
           new Date(story.last_updated_at).toDateString() !== new Date(story.first_seen_at).toDateString() ? (
             <span title={`First seen ${formatAge(story.first_seen_at)}`}>
@@ -93,7 +148,40 @@ export default function StoryCard({ story }: Props) {
             formatAge(story.first_seen_at)
           )}
         </span>
+        {saved ? (
+          <>
+            <span className="px-2 py-0.5 rounded-full text-[0.65rem] font-semibold uppercase tracking-wide" style={{ background: 'var(--emerald-fade)', color: 'var(--forest-mid)' }}>
+              Saved
+            </span>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 ml-auto"
+              style={{ borderColor: 'var(--rule)', color: 'var(--ink-soft)' }}
+              onClick={removeStory}
+              disabled={saving}
+            >
+              <Trash2 size={12} />
+              Remove
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 ml-auto"
+            style={{ borderColor: 'var(--rule)', color: 'var(--forest-mid)' }}
+            onClick={() => setSaveModalOpen(true)}
+            disabled={saving}
+          >
+            <Bookmark size={12} />
+            Save
+          </button>
+        )}
       </div>
+      {notice && (
+        <p className="text-xs mt-2" style={{ color: 'var(--ink-soft)' }}>
+          {notice}
+        </p>
+      )}
 
       {/* Sources toggle */}
       {sources.length > 0 && (
@@ -146,5 +234,15 @@ export default function StoryCard({ story }: Props) {
         </div>
       )}
     </article>
+    <ConfirmActionModal
+      open={saveModalOpen}
+      title="Save story?"
+      description="Do you want to save this story to your Briefcase?"
+      confirmLabel="Yes, save"
+      loading={saving}
+      onCancel={() => setSaveModalOpen(false)}
+      onConfirm={saveStory}
+    />
+    </>
   )
 }
