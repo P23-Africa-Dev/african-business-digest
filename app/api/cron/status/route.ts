@@ -5,7 +5,7 @@ import { getLastDiscussionProcessSnapshot } from '@/lib/processing/discussions'
 export async function GET() {
   const db = createServerClient()
   const cutoff24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-  const [latestRunResult, latestDiscussionResult, discussions24hResult] = await Promise.all([
+  const [latestRunResult, latestDiscussionResult, discussions24hResult, laneRowsResult] = await Promise.all([
     db
       .from('raw_items')
       .select('ingested_at')
@@ -22,6 +22,11 @@ export async function GET() {
       .from('discussions')
       .select('id', { count: 'exact', head: true })
       .gte('ingested_at', cutoff24h),
+    db
+      .from('raw_items')
+      .select('source_type, ingest_lane')
+      .gte('ingested_at', cutoff24h)
+      .limit(2000),
   ])
   let candidateRowsResult = await db
     .from('raw_items')
@@ -57,6 +62,30 @@ export async function GET() {
     )
   }
 
+  let rawItems24hLaneStats: {
+    byLane: Record<string, number>
+    bySourceAndLane: Record<string, number>
+    sampleSize: number
+  } | null = null
+  if (!laneRowsResult.error && laneRowsResult.data) {
+    const byLane: Record<string, number> = {}
+    const bySourceAndLane: Record<string, number> = {}
+    for (const row of laneRowsResult.data) {
+      const lane = (row as { ingest_lane?: string }).ingest_lane ?? 'business_core'
+      const st = row.source_type ?? 'unknown'
+      byLane[lane] = (byLane[lane] ?? 0) + 1
+      const key = `${st}:${lane}`
+      bySourceAndLane[key] = (bySourceAndLane[key] ?? 0) + 1
+    }
+    rawItems24hLaneStats = {
+      byLane,
+      bySourceAndLane,
+      sampleSize: laneRowsResult.data.length,
+    }
+  } else if (laneRowsResult.error && !laneRowsResult.error.message?.includes('ingest_lane')) {
+    console.warn('[cron/status] ingest_lane stats skipped:', laneRowsResult.error.message)
+  }
+
   const candidatesBySource = (candidateRowsResult.data ?? []).reduce<Record<string, number>>((acc, row) => {
     const sourceType = row.source_type ?? 'unknown'
     acc[sourceType] = (acc[sourceType] ?? 0) + 1
@@ -75,6 +104,7 @@ export async function GET() {
   return NextResponse.json({
     ranToday,
     lastRunAt,
+    trendingBroadBraveIngestEnabled: process.env.ENABLE_TRENDING_BROAD_INGEST === 'true',
     discussionDiagnostics: {
       cutoff24h,
       candidateCount: (candidateRowsResult.data ?? []).length,
@@ -85,6 +115,7 @@ export async function GET() {
       lastRunProcessingStats: discussionSnapshot?.stats ?? null,
       lastRunProcessingStatsUpdatedAt: discussionSnapshot?.updatedAt ?? null,
       upsertErrorSummary: discussionSnapshot?.stats.upsertError ?? null,
+      rawItems24hLaneStats,
     },
   })
 }

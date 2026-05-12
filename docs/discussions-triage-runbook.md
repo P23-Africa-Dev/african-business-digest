@@ -58,3 +58,12 @@ Use `Run full trigger` in UI, then inspect response fields:
 - `upsertError` present: fix schema/type mismatch first (especially enum drift).
 - Candidates too low: expand source filters and query coverage.
 - Candidates high but accepted low: tune prefilter/query quality and adjust LLM prompt.
+
+## 7) Trending broad lane (Brave + RSS + Reddit) — cost and noise
+
+Lane `trending_broad` widens ingest beyond strict business. If Brave costs spike or the digest is too noisy:
+
+1. Set **`ENABLE_TRENDING_BROAD_INGEST=false`** (or unset) in the deployment environment. This disables **Brave** `trending_broad` queries and **Twitter / YouTube** trending query buckets (RSS and Reddit lane B configs in code are unchanged; trim those in code if needed).
+2. Inspect **`/api/cron/status`** and **`/api/health`** for `rawItems24hLaneStats` / `rawItemsLaneStats` (counts by lane and `source_type:lane`) to see whether noise is coming from `search`, `news`, or `reddit`.
+3. Reduce **`MAX_TRENDING_BRAVE_QUERIES_PER_RUN`** in `lib/sources/search.ts` (default `3`), **`MAX_TRENDING_TWITTER_QUERIES_PER_RUN`** / **`MAX_TRENDING_YOUTUBE_QUERIES_PER_RUN`** in `lib/sources/twitter.ts` and `lib/sources/youtube.ts` (default `2` each), or trim the `*_TRENDING_*` query lists if you need a finer cap than the env kill-switch.
+4. For Reddit lane B, keep **non-empty** keyword allowlists on country subs; do not remove keywords to chase volume.

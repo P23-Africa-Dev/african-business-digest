@@ -13,6 +13,8 @@ const DB_SAFE_CATEGORIES = new Set([
   'deals_funding',
   'policy',
   'business_failures',
+  'society',
+  'trending',
 ])
 const CATEGORY_FALLBACK_MAP: Record<string, string> = {
   agriculture: 'retail',
@@ -25,22 +27,40 @@ function toDbSafeCategory(category: string): string {
   return CATEGORY_FALLBACK_MAP[category] ?? 'policy'
 }
 
-const SYSTEM_PROMPT = `You are an expert African business news analyst. Your task is to cluster raw news items into coherent stories and produce a structured digest.
+function computeStoryIngestLane(
+  matchingItems: Array<{ url: string; ingest_lane?: string | null }>,
+  primaryUrl: string | undefined
+): 'business_core' | 'trending_broad' {
+  if (matchingItems.length === 0) return 'business_core'
+  if (primaryUrl) {
+    const primary = matchingItems.find((i) => i.url === primaryUrl)
+    if (primary?.ingest_lane === 'trending_broad') return 'trending_broad'
+    if (primary?.ingest_lane === 'business_core') return 'business_core'
+  }
+  return matchingItems.some((i) => i.ingest_lane === 'trending_broad') ? 'trending_broad' : 'business_core'
+}
+
+const SYSTEM_PROMPT = `You are an expert African news analyst. Your task is to cluster raw news items into coherent stories and produce a structured digest.
 
 For each cluster of related items:
 1. Write a synthesized headline (factual, neutral, 10-20 words)
-2. Write a 2-3 sentence summary (paraphrase, never quote directly, neutral business-journalism tone, no speculation)
-3. Assign ONE category from: fintech, logistics, energy, retail, deals_funding, policy, business_failures, agriculture, infrastructure, consumer_markets
+2. Write a 2-3 sentence summary (paraphrase, never quote directly, neutral journalism tone, no speculation)
+3. Assign ONE category from: fintech, logistics, energy, retail, deals_funding, policy, business_failures, agriculture, infrastructure, consumer_markets, society, trending
+   - Use "society" for elections, civic life, public health, education, culture where not purely business-sector.
+   - Use "trending" for viral or fast-moving pan-regional topics that are not a better sector fit.
 4. Infer country tags from the content (use only these slugs: ${LLM_COUNTRY_TAG_HINTS})
-5. Score relevance to "African business news worth knowing" from 0-100 (30+ = newsworthy, 70+ = significant, 90+ = major)
+5. Score relevance to "stories worth knowing for people following Africa" from 0-100 (30+ = newsworthy, 70+ = significant, 90+ = major)
 6. List all source URLs that cover this story, identify the most primary/complete source
+
+Each input item includes "ingest_lane": either "business_core" (business and business-adjacent) or "trending_broad" (broader African trending — politics, economy, infrastructure, major national events).
 
 Rules:
 - Items covering the same underlying event MUST be in the same cluster
 - Do NOT create clusters from a single unrelated item unless it is genuinely significant
 - NEVER quote more than 5 consecutive words from any source
 - Flag speculative or low-confidence items with relevance_score below 30
-- Ignore memes, entertainment, politics unrelated to business
+- For items with ingest_lane "business_core": ignore memes, entertainment, and politics unrelated to business or the economy.
+- For items with ingest_lane "trending_broad": you MAY cluster politics, elections, major civic events, and national economy stories when they are genuinely newsworthy; still ignore pure memes, gossip, and sports unless there is clear economy or policy impact.
 - Write in third person, present-or-recent tense
 
 Respond with valid JSON matching the schema exactly.`
@@ -49,14 +69,52 @@ export async function clusterRawItems(): Promise<number> {
   const db = createServerClient()
   const client = new Anthropic()
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  const rawSelectFull =
+    'id, title, raw_content, url, source_name, source_type, country_tags, published_at, ingest_lane'
+  const rawSelectLegacy =
+    'id, title, raw_content, url, source_name, source_type, country_tags, published_at'
 
-  const { data: rawItems } = await db
+  const fullRes = await db
     .from('raw_items')
-    .select('id, title, raw_content, url, source_name, source_type, country_tags, published_at')
+    .select(rawSelectFull)
     .gte('ingested_at', cutoff)
     .order('published_at', { ascending: false })
 
-  if (!rawItems || rawItems.length === 0) {
+  type RawRow = {
+    id: string
+    title: string
+    raw_content: string | null
+    url: string
+    source_name: string
+    source_type: string
+    country_tags: string[]
+    published_at: string | null
+    ingest_lane?: string | null
+  }
+
+  let rawItems: RawRow[]
+  if (fullRes.error?.message?.includes('ingest_lane')) {
+    const legacy = await db
+      .from('raw_items')
+      .select(rawSelectLegacy)
+      .gte('ingested_at', cutoff)
+      .order('published_at', { ascending: false })
+    if (legacy.error) {
+      console.error('[Cluster] raw_items query failed:', legacy.error)
+      return 0
+    }
+    rawItems = (legacy.data ?? []).map((r) => ({ ...r, ingest_lane: 'business_core' }))
+  } else if (fullRes.error) {
+    console.error('[Cluster] raw_items query failed:', fullRes.error)
+    return 0
+  } else {
+    rawItems = (fullRes.data ?? []).map((r) => ({
+      ...r,
+      ingest_lane: (r as RawRow).ingest_lane ?? 'business_core',
+    }))
+  }
+
+  if (rawItems.length === 0) {
     console.log('[Cluster] No raw items to process')
     return 0
   }
@@ -74,6 +132,7 @@ export async function clusterRawItems(): Promise<number> {
       snippet: item.raw_content?.slice(0, 500),
       source: item.source_name,
       country_hints: item.country_tags,
+      ingest_lane: item.ingest_lane ?? 'business_core',
     }))
 
     let response: Anthropic.Message
@@ -140,32 +199,43 @@ export async function clusterRawItems(): Promise<number> {
     for (const story of parsed.stories) {
       if (story.relevance_score < 30) continue
 
-      const { data: inserted, error } = await db
+      const matchingItems = rawItems.filter((item) => story.source_urls?.includes(item.url))
+      const storyLane = computeStoryIngestLane(matchingItems, story.primary_url)
+
+      const baseRow = {
+        headline: story.headline,
+        summary: story.summary,
+        category: toDbSafeCategory(story.category),
+        country_tags: story.country_tags,
+        relevance_score: story.relevance_score,
+        status: 'new' as const,
+        first_seen_at: new Date().toISOString(),
+        last_updated_at: new Date().toISOString(),
+      }
+
+      let insertedRow: { id: string } | null = null
+      const withLane = await db
         .from('stories')
-        .insert({
-          headline: story.headline,
-          summary: story.summary,
-          category: toDbSafeCategory(story.category),
-          country_tags: story.country_tags,
-          relevance_score: story.relevance_score,
-          status: 'new',
-          first_seen_at: new Date().toISOString(),
-          last_updated_at: new Date().toISOString(),
-        })
+        .insert({ ...baseRow, ingest_lane: storyLane })
         .select('id')
         .single()
 
-      if (error || !inserted) {
-        console.error('[Cluster] Failed to insert story:', error)
-        continue
+      if (!withLane.error && withLane.data) {
+        insertedRow = withLane.data
+      } else if (withLane.error?.message?.includes('ingest_lane')) {
+        const noLane = await db.from('stories').insert(baseRow).select('id').single()
+        if (!noLane.error && noLane.data) insertedRow = noLane.data
+        else console.error('[Cluster] Failed to insert story:', noLane.error)
+      } else {
+        console.error('[Cluster] Failed to insert story:', withLane.error)
       }
 
-      // Link source URLs to the story
-      const matchingItems = rawItems.filter((item) => story.source_urls?.includes(item.url))
+      if (!insertedRow) continue
+
       if (matchingItems.length > 0) {
         await db.from('story_sources').insert(
           matchingItems.map((item) => ({
-            story_id: inserted.id,
+            story_id: insertedRow.id,
             raw_item_id: item.id,
             is_primary: item.url === story.primary_url,
           }))

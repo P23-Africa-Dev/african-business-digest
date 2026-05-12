@@ -36,7 +36,7 @@ export async function GET() {
           .gte('ingested_at', cutoff24h)
       }
     }
-    const [discussions24hResult, latestDiscussionResult] = await Promise.all([
+    const [discussions24hResult, latestDiscussionResult, laneRowsResult] = await Promise.all([
       db
         .from('discussions')
         .select('id', { count: 'exact', head: true })
@@ -47,12 +47,37 @@ export async function GET() {
         .order('ingested_at', { ascending: false })
         .limit(1)
         .maybeSingle(),
+      db
+        .from('raw_items')
+        .select('source_type, ingest_lane')
+        .gte('ingested_at', cutoff24h)
+        .limit(2000),
     ])
     const discussionCandidates24h = (discussionCandidatesResult.data ?? []).length
     const discussionsInserted24h = discussions24hResult.count ?? 0
     const discussionCandidateQueryError = discussionCandidatesResult.error?.message ?? null
     const discussionsHealthy =
       !discussionCandidateQueryError && !(discussionCandidates24h >= 20 && discussionsInserted24h === 0)
+
+    let rawItemsLaneStats: {
+      byLane: Record<string, number>
+      bySourceAndLane: Record<string, number>
+      sampleSize: number
+    } | null = null
+    if (!laneRowsResult.error && laneRowsResult.data) {
+      const byLane: Record<string, number> = {}
+      const bySourceAndLane: Record<string, number> = {}
+      for (const row of laneRowsResult.data) {
+        const lane = (row as { ingest_lane?: string }).ingest_lane ?? 'business_core'
+        const st = row.source_type ?? 'unknown'
+        byLane[lane] = (byLane[lane] ?? 0) + 1
+        const key = `${st}:${lane}`
+        bySourceAndLane[key] = (bySourceAndLane[key] ?? 0) + 1
+      }
+      rawItemsLaneStats = { byLane, bySourceAndLane, sampleSize: laneRowsResult.data.length }
+    } else if (laneRowsResult.error && !laneRowsResult.error.message?.includes('ingest_lane')) {
+      console.warn('[health] ingest_lane stats skipped:', laneRowsResult.error.message)
+    }
 
     return NextResponse.json({
       status: discussionsHealthy ? 'ok' : 'degraded',
@@ -70,6 +95,7 @@ export async function GET() {
         braveMonthlyCap: 950,
         braveAllowed: brave.allowed,
       },
+      trendingBroadBraveIngestEnabled: process.env.ENABLE_TRENDING_BROAD_INGEST === 'true',
       discussions: {
         cutoff24h,
         candidateCount24h: discussionCandidates24h,
@@ -77,6 +103,7 @@ export async function GET() {
         latestSuccessfulDiscussionAt: latestDiscussionResult.data?.ingested_at ?? null,
         healthy: discussionsHealthy,
         candidateQueryError: discussionCandidateQueryError,
+        rawItemsLaneStats,
         unhealthyReason: discussionsHealthy
           ? null
           : discussionCandidateQueryError

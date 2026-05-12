@@ -13,6 +13,8 @@ const CATEGORY_ICONS: Record<Category, string> = {
   agriculture: '🌾',
   infrastructure: '🏗',
   consumer_markets: '🛒',
+  society: '🏛',
+  trending: '🔥',
 }
 
 interface Props {

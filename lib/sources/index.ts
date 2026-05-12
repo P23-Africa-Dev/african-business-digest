@@ -4,7 +4,15 @@ import { ingestReddit } from './reddit'
 import { ingestSearch } from './search'
 import { ingestTwitter } from './twitter'
 import { ingestYoutube } from './youtube'
-import type { RawItem } from '@/lib/types'
+import type { IngestLane, RawItem } from '@/lib/types'
+
+/** When two raw items share a URL, keep business_core if either side is business_core. */
+function mergeIngestLane(a: IngestLane | undefined, b: IngestLane | undefined): IngestLane {
+  const la = a ?? 'business_core'
+  const lb = b ?? 'business_core'
+  if (la === 'business_core' || lb === 'business_core') return 'business_core'
+  return 'trending_broad'
+}
 
 export interface IngestResult {
   rss: number
@@ -76,7 +84,11 @@ export async function runIngestion(): Promise<IngestResult> {
     const normalizedUrl = item.url.trim()
     const existing = dedupedItemsByUrl.get(normalizedUrl)
     if (!existing) {
-      dedupedItemsByUrl.set(normalizedUrl, { ...item, url: normalizedUrl })
+      dedupedItemsByUrl.set(normalizedUrl, {
+        ...item,
+        url: normalizedUrl,
+        ingest_lane: item.ingest_lane ?? 'business_core',
+      })
       continue
     }
 
@@ -84,6 +96,7 @@ export async function runIngestion(): Promise<IngestResult> {
     dedupedItemsByUrl.set(normalizedUrl, {
       ...existing,
       url: normalizedUrl,
+      ingest_lane: mergeIngestLane(existing.ingest_lane, item.ingest_lane),
       // Prefer richer textual fields when available.
       title: existing.title?.trim() ? existing.title : item.title,
       raw_content:
@@ -115,6 +128,7 @@ export async function runIngestion(): Promise<IngestResult> {
       published_at: item.published_at ?? null,
       ingested_at: ingestedAt,
       country_tags: item.country_tags,
+      ingest_lane: item.ingest_lane ?? 'business_core',
     }))
 
     const rowsWithEngagement = baseRows.map((row, idx) => ({
@@ -122,22 +136,45 @@ export async function runIngestion(): Promise<IngestResult> {
       engagement_score: uniqueItems[idx]?.engagement_score ?? 0,
     }))
 
-    let { data, error } = await db
-      .from('raw_items')
-      .upsert(rowsWithEngagement, { onConflict: 'url', ignoreDuplicates: false })
-      .select('id')
+    const rowsLegacyEngagementOnly = uniqueItems.map((item) => ({
+      source_type: item.source_type,
+      source_name: item.source_name,
+      url: item.url,
+      title: item.title,
+      raw_content: item.raw_content ?? null,
+      published_at: item.published_at ?? null,
+      ingested_at: ingestedAt,
+      country_tags: item.country_tags,
+      engagement_score: item.engagement_score ?? 0,
+    }))
 
-    const isMissingEngagementColumn =
-      error?.message?.includes("Could not find the 'engagement_score' column") ?? false
+    const rowsLegacyMinimal = uniqueItems.map((item) => ({
+      source_type: item.source_type,
+      source_name: item.source_name,
+      url: item.url,
+      title: item.title,
+      raw_content: item.raw_content ?? null,
+      published_at: item.published_at ?? null,
+      ingested_at: ingestedAt,
+      country_tags: item.country_tags,
+    }))
 
-    if (isMissingEngagementColumn) {
-      console.warn('[Ingest] raw_items.engagement_score missing; retrying upsert without it')
-      const retry = await db
+    const upsertAttempts = [rowsWithEngagement, baseRows, rowsLegacyEngagementOnly, rowsLegacyMinimal]
+    let data: { id: string }[] | null = null
+    let error: { message: string } | null = null
+    for (let a = 0; a < upsertAttempts.length; a++) {
+      const attempt = upsertAttempts[a]!
+      const res = await db
         .from('raw_items')
-        .upsert(baseRows, { onConflict: 'url', ignoreDuplicates: false })
+        .upsert(attempt, { onConflict: 'url', ignoreDuplicates: false })
         .select('id')
-      data = retry.data
-      error = retry.error
+      if (!res.error) {
+        data = res.data
+        error = null
+        if (a > 0) console.warn(`[Ingest] raw_items upsert succeeded on fallback attempt ${a + 1}`)
+        break
+      }
+      error = res.error
     }
 
     if (error) {

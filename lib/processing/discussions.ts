@@ -13,6 +13,8 @@ const DB_SAFE_CATEGORIES = new Set([
   'deals_funding',
   'policy',
   'business_failures',
+  'society',
+  'trending',
 ])
 const CATEGORY_FALLBACK_MAP: Record<string, string> = {
   agriculture: 'retail',
@@ -75,6 +77,7 @@ type DiscussionCandidate = {
   country_tags: string[]
   published_at: string | null
   engagement_score: number
+  ingest_lane?: string | null
 }
 
 export type DiscussionProcessStats = {
@@ -119,6 +122,7 @@ function scoreDiscussionCandidate(candidate: DiscussionCandidate): number {
     if (blob.includes(term)) score += 2
   }
   if ((candidate.engagement_score ?? 0) > 0) score += Math.min(8, Math.ceil(candidate.engagement_score / 10))
+  if (candidate.ingest_lane === 'business_core') score += 4
   if (candidate.source_type === 'reddit') score += 4
   if (candidate.source_type === 'search') score += 2
   if (candidate.source_type === 'news') score += 1
@@ -134,16 +138,16 @@ function scoreDiscussionCandidate(candidate: DiscussionCandidate): number {
   return score
 }
 
-const SYSTEM_PROMPT = `You are a filter for African business discussions online.
+const SYSTEM_PROMPT = `You are a filter for African discussions online (business and broader trending).
 
-Given an indexed list of Reddit posts and web content, identify which ones represent genuine business discussion.
+Given an indexed list of Reddit posts and web content, identify which ones merit inclusion in a daily digest.
 
 For each item return:
 - index: the original index number from the input (required)
-- is_business_relevant: true ONLY if it discusses real business activity, startups, markets, investment, economic policy, or business failures
+- is_business_relevant: true if it discusses real business activity, startups, markets, investment, economic policy, business failures, OR (when the input item has ingest_lane "trending_broad") substantive national news: elections, major government actions, currency/economy, infrastructure, or civic events with clear public impact
 - excerpt: 1-2 sentence paraphrased summary (neutral tone, no direct quotes)
 - country_tags: array using only these slugs: ${LLM_COUNTRY_TAG_HINTS}
-- category: one of fintech/logistics/energy/retail/deals_funding/policy/business_failures/agriculture/infrastructure/consumer_markets, or null
+- category: one of fintech/logistics/energy/retail/deals_funding/policy/business_failures/agriculture/infrastructure/consumer_markets/society/trending, or null
 
 Return valid JSON only: { "discussions": [ { "index": 0, "is_business_relevant": true, ... }, ... ] }`
 
@@ -166,7 +170,7 @@ export async function processDiscussions(): Promise<DiscussionProcessResult> {
 
   let rawItemsQuery = await db
     .from('raw_items')
-    .select('id, url, title, raw_content, source_type, source_name, country_tags, published_at, engagement_score')
+    .select('id, url, title, raw_content, source_type, source_name, country_tags, published_at, engagement_score, ingest_lane')
     .in('source_type', DISCUSSION_SOURCE_TYPES)
     .gte('ingested_at', cutoff)
     .order('ingested_at', { ascending: false })
@@ -178,11 +182,24 @@ export async function processDiscussions(): Promise<DiscussionProcessResult> {
     if (maybeEnumMismatch) {
       rawItemsQuery = await db
         .from('raw_items')
-        .select('id, url, title, raw_content, source_type, source_name, country_tags, published_at, engagement_score')
+        .select('id, url, title, raw_content, source_type, source_name, country_tags, published_at, engagement_score, ingest_lane')
         .in('source_type', LEGACY_DISCUSSION_SOURCE_TYPES)
         .gte('ingested_at', cutoff)
         .order('ingested_at', { ascending: false })
         .limit(300)
+    }
+  }
+  if (rawItemsQuery.error?.message?.includes('ingest_lane')) {
+    for (const types of [DISCUSSION_SOURCE_TYPES, LEGACY_DISCUSSION_SOURCE_TYPES]) {
+      const fallbackRes = await db
+        .from('raw_items')
+        .select('id, url, title, raw_content, source_type, source_name, country_tags, published_at, engagement_score')
+        .in('source_type', types)
+        .gte('ingested_at', cutoff)
+        .order('ingested_at', { ascending: false })
+        .limit(300)
+      rawItemsQuery = fallbackRes as typeof rawItemsQuery
+      if (!rawItemsQuery.error) break
     }
   }
   if (rawItemsQuery.error) {
@@ -191,7 +208,10 @@ export async function processDiscussions(): Promise<DiscussionProcessResult> {
     return { processedCount: 0, stats: baseStats }
   }
 
-  const rawCandidates = ((rawItemsQuery.data ?? []) as DiscussionCandidate[])
+  const rawCandidates = (rawItemsQuery.data ?? []).map((row) => ({
+    ...(row as DiscussionCandidate),
+    ingest_lane: (row as DiscussionCandidate).ingest_lane ?? 'business_core',
+  }))
   baseStats.candidateCount = rawCandidates.length
   baseStats.candidatesBySource = toSourceCounts(rawCandidates)
   if (rawCandidates.length === 0) {
@@ -221,6 +241,7 @@ export async function processDiscussions(): Promise<DiscussionProcessResult> {
     snippet: item.raw_content?.slice(0, 500) ?? null,
     source: item.source_name,
     country_hints: item.country_tags,
+    ingest_lane: item.ingest_lane ?? 'business_core',
   }))
 
   let parsed

@@ -7,6 +7,7 @@ import FilterBar from '@/components/FilterBar'
 import CategorySection from '@/components/CategorySection'
 import DiscussionsPanel from '@/components/DiscussionsPanel'
 import RunDigestButton from '@/components/RunDigestButton'
+import StoryCard from '@/components/StoryCard'
 
 export const revalidate = 1800 // 30 min
 
@@ -60,10 +61,13 @@ export default async function DigestPage({ searchParams }: Props) {
     usedCountryFallback,
   } = digest
 
+  const coreStories = stories.filter((s) => s.ingest_lane !== 'trending_broad')
+  const trendingLaneStories = stories.filter((s) => s.ingest_lane === 'trending_broad')
+
   // Group stories by category
   const byCategory = CATEGORIES.reduce<Record<Category, typeof stories>>(
     (acc, cat) => {
-      acc[cat] = stories.filter((s) => s.category === cat)
+      acc[cat] = coreStories.filter((s) => s.category === cat)
       return acc
     },
     {} as Record<Category, typeof stories>
@@ -75,7 +79,7 @@ export default async function DigestPage({ searchParams }: Props) {
     return diff
   })
 
-  const hasStories = stories.length > 0
+  const hasStories = coreStories.length > 0
   const hasDiscussions = discussions.length > 0
   const activeCategoriesCount = orderedCategories.filter((cat) => (byCategory[cat]?.length ?? 0) > 0).length
   let savedStoryIds: string[] = []
@@ -93,7 +97,12 @@ export default async function DigestPage({ searchParams }: Props) {
 
   console.log('[DigestPage] Render digest', {
     params,
-    counts: { stories: stories.length, discussions: discussions.length },
+    counts: {
+      stories: stories.length,
+      coreStories: coreStories.length,
+      trendingLaneStories: trendingLaneStories.length,
+      discussions: discussions.length,
+    },
     lastUpdated,
     hasStories,
     hasDiscussions,
@@ -129,10 +138,10 @@ export default async function DigestPage({ searchParams }: Props) {
             </div>
           </div>
           <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-2.5">
-            <KpiCard label="Stories" value={stories.length} />
+            <KpiCard label="Business stories" value={coreStories.length} />
+            <KpiCard label="Trending picks" value={trendingLaneStories.length} />
             <KpiCard label="Live Discussions" value={discussions.length} />
             <KpiCard label="Active Sectors" value={activeCategoriesCount} />
-            <KpiCard label="Topical Breadth" value={`${Math.max(1, Math.min(100, stories.length * 3))}%`} />
           </div>
         </div>
       </header>
@@ -176,6 +185,33 @@ export default async function DigestPage({ searchParams }: Props) {
                 usedCountryFallback={Boolean(usedCountryFallback)}
               />
             )}
+            {trendingLaneStories.length > 0 ? (
+              <section
+                className="mt-12 rounded-xl border p-5 sm:p-6"
+                style={{ borderColor: 'var(--rule)', background: 'rgba(255,255,255,0.75)' }}
+                aria-labelledby="trending-africa-heading"
+              >
+                <h2
+                  id="trending-africa-heading"
+                  className="font-display text-xl sm:text-2xl font-bold tracking-tight mb-1"
+                  style={{ color: 'var(--forest)' }}
+                >
+                  Trending in Africa
+                </h2>
+                <p className="text-sm mb-5" style={{ color: 'var(--ink-soft)' }}>
+                  Broader headlines and national stories from the trending lane — still ranked for relevance, separate from the core business digest above.
+                </p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {trendingLaneStories.map((story) => (
+                    <StoryCard
+                      key={story.id}
+                      story={story}
+                      isSaved={savedStoryIds.includes(story.id)}
+                    />
+                  ))}
+                </div>
+              </section>
+            ) : null}
           </div>
 
           {/* Discussions — desktop sidebar */}

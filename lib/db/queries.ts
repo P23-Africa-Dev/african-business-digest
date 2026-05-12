@@ -26,6 +26,29 @@ function isEnumCategoryMismatch(err: unknown): boolean {
   return e.code === '22P02' && msg.includes('enum') && msg.includes('category_enum')
 }
 
+/** Nested embed fails when `raw_items.ingest_lane` column is missing (migration 006 not applied). */
+function isIngestLaneEmbedError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false
+  const e = err as { code?: string; message?: string; details?: string }
+  const msg = `${e.message ?? ''} ${e.details ?? ''}`.toLowerCase()
+  if (msg.includes('ingest_lane')) return true
+  if (e.code === 'PGRST204' && msg.includes('raw_items')) return true
+  return false
+}
+
+function storiesSelect(embedRawIngestLane: boolean): string {
+  const rawItemsFields = embedRawIngestLane
+    ? 'id, source_name, url, title, published_at, source_type, ingested_at, ingest_lane'
+    : 'id, source_name, url, title, published_at, source_type, ingested_at'
+  return `
+        *,
+        story_sources (
+          id, story_id, raw_item_id, is_primary,
+          raw_items ( ${rawItemsFields} )
+        )
+      `
+}
+
 export async function getDigest(params: {
   category?: string
   country?: string
@@ -46,17 +69,12 @@ export async function getDigest(params: {
     withCategory: boolean
     minRelevanceFloor: number
     useCountryFallback: boolean
+    embedRawIngestLane?: boolean
   }) => {
-    const { withCategory, minRelevanceFloor, useCountryFallback } = opts
+    const { withCategory, minRelevanceFloor, useCountryFallback, embedRawIngestLane = true } = opts
     let q = db
       .from('stories')
-      .select(`
-        *,
-        story_sources (
-          id, story_id, raw_item_id, is_primary,
-          raw_items ( id, source_name, url, title, published_at, source_type, ingested_at )
-        )
-      `)
+      .select(storiesSelect(embedRawIngestLane))
       .gte('relevance_score', minRelevanceFloor)
       .neq('status', 'fading')
       .gte('first_seen_at', storiesCutoff)
@@ -71,6 +89,19 @@ export async function getDigest(params: {
       }
     }
     return q
+  }
+
+  const fetchStoriesWithEmbedFallback = async (opts: {
+    withCategory: boolean
+    minRelevanceFloor: number
+    useCountryFallback: boolean
+  }) => {
+    let result = await makeStoriesQuery({ ...opts, embedRawIngestLane: true })
+    if (result.error && isIngestLaneEmbedError(result.error)) {
+      console.warn('[DB:getDigest] Retrying without raw_items.ingest_lane in embed', compactDbError(result.error))
+      result = await makeStoriesQuery({ ...opts, embedRawIngestLane: false })
+    }
+    return result
   }
 
   let discussionsQuery = db
@@ -94,7 +125,7 @@ export async function getDigest(params: {
     const countryModes =
       country && country !== 'rest_of_africa' ? [false, true] : [false]
     for (const useCountryFallback of countryModes) {
-      let attemptResult = await makeStoriesQuery({
+      let attemptResult = await fetchStoriesWithEmbedFallback({
         withCategory: true,
         minRelevanceFloor: tierMin,
         useCountryFallback,
@@ -104,7 +135,7 @@ export async function getDigest(params: {
           category,
           storiesError: compactDbError(attemptResult.error),
         })
-        attemptResult = await makeStoriesQuery({
+        attemptResult = await fetchStoriesWithEmbedFallback({
           withCategory: false,
           minRelevanceFloor: tierMin,
           useCountryFallback,
@@ -134,7 +165,7 @@ export async function getDigest(params: {
   }
 
   if (!storiesResult) {
-    storiesResult = await makeStoriesQuery({
+    storiesResult = await fetchStoriesWithEmbedFallback({
       withCategory: true,
       minRelevanceFloor: effectiveMinRelevance,
       useCountryFallback: false,
@@ -159,8 +190,11 @@ export async function getDigest(params: {
       filters: { category: category ?? null, country: country ?? null, minRelevance },
       cutoffs: { storiesCutoff, discussionsCutoff },
       storiesError: compactDbError(storiesResult.error),
+      storiesErrorRaw: storiesResult.error,
       discussionsError: compactDbError(discussionsResult.error),
+      discussionsErrorRaw: discussionsResult.error,
       lastIngestError: compactDbError(lastIngestResult.error),
+      lastIngestErrorRaw: lastIngestResult.error,
     })
     throw new Error('Digest query failed')
   }

@@ -1,6 +1,8 @@
 export type SourceType = 'news' | 'reddit' | 'search' | 'twitter' | 'youtube'
 export type StoryStatus = 'new' | 'developing' | 'fading'
 export type SavedItemType = 'story' | 'discussion'
+export type IngestLane = 'business_core' | 'trending_broad'
+
 export type Category =
   | 'fintech'
   | 'logistics'
@@ -12,6 +14,8 @@ export type Category =
   | 'agriculture'
   | 'infrastructure'
   | 'consumer_markets'
+  | 'society'
+  | 'trending'
 
 export const CATEGORIES_PRIMARY: Category[] = [
   'fintech',
@@ -22,7 +26,13 @@ export const CATEGORIES_PRIMARY: Category[] = [
   'policy',
   'business_failures',
 ]
-export const CATEGORIES_EXTRA: Category[] = ['agriculture', 'infrastructure', 'consumer_markets']
+export const CATEGORIES_EXTRA: Category[] = [
+  'agriculture',
+  'infrastructure',
+  'consumer_markets',
+  'society',
+  'trending',
+]
 export const CATEGORIES: Category[] = [...CATEGORIES_PRIMARY, ...CATEGORIES_EXTRA]
 
 export const CATEGORY_LABELS: Record<Category, string> = {
@@ -36,6 +46,8 @@ export const CATEGORY_LABELS: Record<Category, string> = {
   agriculture: 'Agriculture',
   infrastructure: 'Infrastructure',
   consumer_markets: 'Consumer & Markets',
+  society: 'Society',
+  trending: 'Trending',
 }
 
 export const COUNTRIES = [
@@ -80,6 +92,8 @@ export interface RawItem {
   ingested_at?: string
   country_tags: string[]
   engagement_score?: number
+  /** Defaults to business_core when omitted (legacy rows / callers). */
+  ingest_lane?: IngestLane
 }
 
 export interface Story {
@@ -92,6 +106,8 @@ export interface Story {
   status: StoryStatus
   first_seen_at: string
   last_updated_at: string
+  /** Defaults to business_core when omitted (legacy rows). */
+  ingest_lane?: IngestLane
   sources?: StorySource[]
 }
 

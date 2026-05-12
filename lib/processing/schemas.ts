@@ -11,6 +11,8 @@ export const CategorySchema = z.enum([
   'agriculture',
   'infrastructure',
   'consumer_markets',
+  'society',
+  'trending',
 ])
 
 export const ClusteredStorySchema = z.object({
