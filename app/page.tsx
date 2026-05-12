@@ -114,7 +114,42 @@ export default async function DigestPage({ searchParams }: Props) {
       {/* Masthead */}
       <header className="masthead-stripe text-white relative overflow-hidden">
         <div className="absolute inset-x-0 -bottom-20 h-44 bg-gradient-to-t from-black/20 to-transparent" />
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 pb-8 relative">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-4 pb-8 relative">
+          {/* Top nav row */}
+          <div className="flex items-center justify-end mb-4">
+            <a
+              href="/saved"
+              className="group inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-semibold tracking-wide transition-all duration-200"
+              style={{
+                background: 'rgba(255,255,255,0.12)',
+                border: '1px solid rgba(255,255,255,0.28)',
+                backdropFilter: 'blur(8px)',
+                color: 'rgba(255,255,255,0.9)',
+              }}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                className="w-3.5 h-3.5 transition-transform duration-200 group-hover:-translate-y-0.5"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M6.32 2.577a49.255 49.255 0 0 1 11.36 0c1.497.174 2.57 1.46 2.57 2.93V21a.75.75 0 0 1-1.085.67L12 18.089l-7.165 3.583A.75.75 0 0 1 3.75 21V5.507c0-1.47 1.073-2.756 2.57-2.93Z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              Reading List
+              {(savedStoryIds.length + savedDiscussionIds.length) > 0 && (
+                <span
+                  className="inline-flex items-center justify-center rounded-full text-[0.6rem] font-bold leading-none w-4 h-4"
+                  style={{ background: 'rgba(255,255,255,0.9)', color: 'var(--forest)' }}
+                >
+                  {savedStoryIds.length + savedDiscussionIds.length}
+                </span>
+              )}
+            </a>
+          </div>
           <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
             <div>
               <p className="text-[0.65rem] font-semibold tracking-[0.22em] uppercase opacity-75 mb-2">
