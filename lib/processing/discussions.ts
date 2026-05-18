@@ -3,29 +3,15 @@ import { createServerClient } from '@/lib/db/client'
 import { LLM_COUNTRY_TAG_HINTS } from '@/lib/regions'
 import { DiscussionFilterSchema } from './schemas'
 import { recordUsage } from './budget'
+import { isCategoryEnumMismatch, toDbSafeCategoryStrict } from './categories'
+import {
+  discussionPlatformForDb,
+} from '@/lib/discussions/display'
 import type { SourceType } from '@/lib/types'
 
-const DB_SAFE_CATEGORIES = new Set([
-  'fintech',
-  'logistics',
-  'energy',
-  'retail',
-  'deals_funding',
-  'policy',
-  'business_failures',
-  'society',
-  'trending',
-])
-const CATEGORY_FALLBACK_MAP: Record<string, string> = {
-  agriculture: 'retail',
-  consumer_markets: 'retail',
-  infrastructure: 'logistics',
-}
-
-function toDbSafeCategory(category: string | null | undefined): string | null {
+function toDbSafeDiscussionCategory(category: string | null | undefined): string | null {
   if (!category) return null
-  if (DB_SAFE_CATEGORIES.has(category)) return category
-  return CATEGORY_FALLBACK_MAP[category] ?? 'policy'
+  return toDbSafeCategoryStrict(category)
 }
 
 const DISCUSSION_SOURCE_TYPES: SourceType[] = ['news', 'reddit', 'search', 'twitter', 'youtube']
@@ -66,6 +52,8 @@ const DISCUSSION_PREFERRED_DOMAINS = [
   'twitter.com',
 ]
 const MAX_CANDIDATES_FOR_LLM = 100
+const MAX_RAW_CANDIDATES = 500
+const RESERVED_TWITTER_SLOTS = 15
 
 type DiscussionCandidate = {
   id: string
@@ -123,9 +111,11 @@ function scoreDiscussionCandidate(candidate: DiscussionCandidate): number {
   }
   if ((candidate.engagement_score ?? 0) > 0) score += Math.min(8, Math.ceil(candidate.engagement_score / 10))
   if (candidate.ingest_lane === 'business_core') score += 4
+  if (candidate.source_type === 'twitter') score += 5
   if (candidate.source_type === 'reddit') score += 4
   if (candidate.source_type === 'search') score += 2
   if (candidate.source_type === 'news') score += 1
+  if (candidate.ingest_lane === 'trending_broad') score += 3
   if (
     DISCUSSION_PREFERRED_DOMAINS.some((domain) => {
       const source = candidate.source_name.toLowerCase()
@@ -140,7 +130,7 @@ function scoreDiscussionCandidate(candidate: DiscussionCandidate): number {
 
 const SYSTEM_PROMPT = `You are a filter for African discussions online (business and broader trending).
 
-Given an indexed list of Reddit posts and web content, identify which ones merit inclusion in a daily digest.
+Given an indexed list of Reddit posts, X (Twitter) posts, and web content, identify which ones merit inclusion in a daily digest.
 
 For each item return:
 - index: the original index number from the input (required)
@@ -174,7 +164,7 @@ export async function processDiscussions(): Promise<DiscussionProcessResult> {
     .in('source_type', DISCUSSION_SOURCE_TYPES)
     .gte('ingested_at', cutoff)
     .order('ingested_at', { ascending: false })
-    .limit(300)
+    .limit(MAX_RAW_CANDIDATES)
   if (rawItemsQuery.error) {
     const maybeEnumMismatch =
       rawItemsQuery.error.code === '22P02' &&
@@ -186,7 +176,7 @@ export async function processDiscussions(): Promise<DiscussionProcessResult> {
         .in('source_type', LEGACY_DISCUSSION_SOURCE_TYPES)
         .gte('ingested_at', cutoff)
         .order('ingested_at', { ascending: false })
-        .limit(300)
+        .limit(MAX_RAW_CANDIDATES)
     }
   }
   if (rawItemsQuery.error?.message?.includes('ingest_lane')) {
@@ -197,7 +187,7 @@ export async function processDiscussions(): Promise<DiscussionProcessResult> {
         .in('source_type', types)
         .gte('ingested_at', cutoff)
         .order('ingested_at', { ascending: false })
-        .limit(300)
+        .limit(MAX_RAW_CANDIDATES)
       rawItemsQuery = fallbackRes as typeof rawItemsQuery
       if (!rawItemsQuery.error) break
     }
@@ -222,10 +212,18 @@ export async function processDiscussions(): Promise<DiscussionProcessResult> {
   const scored = rawCandidates
     .map((item) => ({ item, score: scoreDiscussionCandidate(item) }))
     .sort((a, b) => b.score - a.score)
-  const prefilteredItems = scored
-    .filter(({ score }, idx) => score >= 2 || idx < 20)
-    .slice(0, MAX_CANDIDATES_FOR_LLM)
+
+  const twitterReserved = scored
+    .filter(({ item }) => item.source_type === 'twitter')
+    .slice(0, RESERVED_TWITTER_SLOTS)
     .map(({ item }) => item)
+  const reservedIds = new Set(twitterReserved.map((i) => i.id))
+  const prefilteredItems: DiscussionCandidate[] = [...twitterReserved]
+  for (const { item, score } of scored) {
+    if (prefilteredItems.length >= MAX_CANDIDATES_FOR_LLM) break
+    if (reservedIds.has(item.id)) continue
+    if (score >= 2 || prefilteredItems.length < 20) prefilteredItems.push(item)
+  }
 
   baseStats.prefilteredCount = prefilteredItems.length
   baseStats.prefilteredBySource = toSourceCounts(prefilteredItems)
@@ -283,26 +281,76 @@ export async function processDiscussions(): Promise<DiscussionProcessResult> {
       const rawItem = prefilteredItems[d.index]
       if (!rawItem) return null
       return {
-        platform: rawItem.source_name ?? 'unknown',
+        platform: discussionPlatformForDb(rawItem.source_type, rawItem.source_name),
+        source_type: rawItem.source_type,
         url: rawItem.url,
         title: rawItem.title,
         excerpt: d.excerpt ?? null,
         engagement_score: Math.min(100, Math.max(0, Number(rawItem.engagement_score) || 0)),
         country_tags: d.country_tags,
-        category: toDbSafeCategory(d.category),
+        category: toDbSafeDiscussionCategory(d.category),
         posted_at: rawItem.published_at ?? null,
         ingested_at: new Date().toISOString(),
       }
     })
     .filter((x): x is NonNullable<typeof x> => x !== null)
 
-  const { error } = await db
+  const rowsWithoutSourceType = toInsert.map(({ source_type, ...row }) => {
+    void source_type
+    return row
+  })
+  let upsertRes = await db
     .from('discussions')
     .upsert(toInsert, { onConflict: 'url', ignoreDuplicates: false })
+  if (upsertRes.error?.message?.includes('source_type')) {
+    console.warn('[Discussions] Retrying upsert without source_type (migration 008 not applied)')
+    upsertRes = await db
+      .from('discussions')
+      .upsert(rowsWithoutSourceType, { onConflict: 'url', ignoreDuplicates: false })
+  }
+  if (upsertRes.error && isCategoryEnumMismatch(upsertRes.error)) {
+    console.warn('[Discussions] Category enum mismatch — retrying with core categories only')
+    const strictRows = toInsert.map((row) => ({
+      ...row,
+      category: row.category ? toDbSafeCategoryStrict(row.category) : null,
+    }))
+    upsertRes = await db
+      .from('discussions')
+      .upsert(strictRows, { onConflict: 'url', ignoreDuplicates: false })
+    if (upsertRes.error?.message?.includes('source_type')) {
+      upsertRes = await db
+        .from('discussions')
+        .upsert(
+          strictRows.map(({ source_type: _st, ...row }) => {
+            void _st
+            return row
+          }),
+          { onConflict: 'url', ignoreDuplicates: false }
+        )
+    }
+  }
+  if (upsertRes.error && isCategoryEnumMismatch(upsertRes.error)) {
+    console.warn('[Discussions] Retrying upsert with category policy for all rows')
+    const policyRows = toInsert.map((row) => ({ ...row, category: 'policy' as const }))
+    upsertRes = await db
+      .from('discussions')
+      .upsert(policyRows, { onConflict: 'url', ignoreDuplicates: false })
+    if (upsertRes.error?.message?.includes('source_type')) {
+      upsertRes = await db
+        .from('discussions')
+        .upsert(
+          policyRows.map(({ source_type: _st, ...row }) => {
+            void _st
+            return row
+          }),
+          { onConflict: 'url', ignoreDuplicates: false }
+        )
+    }
+  }
 
-  if (error) {
-    console.error('[Discussions] Upsert failed:', error)
-    baseStats.upsertError = error.message
+  if (upsertRes.error) {
+    console.error('[Discussions] Upsert failed:', upsertRes.error)
+    baseStats.upsertError = upsertRes.error.message
     lastDiscussionProcessSnapshot = { updatedAt: new Date().toISOString(), stats: baseStats }
     return { processedCount: 0, stats: baseStats }
   }

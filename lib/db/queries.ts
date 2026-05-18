@@ -26,6 +26,18 @@ function isEnumCategoryMismatch(err: unknown): boolean {
   return e.code === '22P02' && msg.includes('enum') && msg.includes('category_enum')
 }
 
+function isDbConnectivityError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false
+  const e = err as { message?: string; details?: string }
+  const blob = `${e.message ?? ''} ${e.details ?? ''}`.toLowerCase()
+  return (
+    blob.includes('fetch failed') ||
+    blob.includes('enotfound') ||
+    blob.includes('econnrefused') ||
+    blob.includes('network')
+  )
+}
+
 /** Nested embed fails when `raw_items.ingest_lane` column is missing (migration 006 not applied). */
 function isIngestLaneEmbedError(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false
@@ -186,6 +198,30 @@ export async function getDigest(params: {
     lastIngestResult.error && (lastIngestResult.error as { code?: string }).code !== 'PGRST116'
 
   if (storiesResult.error || discussionsResult.error || fatalLastIngestError) {
+    const connectivityFailure =
+      isDbConnectivityError(storiesResult.error) ||
+      isDbConnectivityError(discussionsResult.error) ||
+      isDbConnectivityError(lastIngestResult.error)
+
+    if (connectivityFailure) {
+      console.warn('[DB:getDigest] Supabase unreachable — returning empty digest', {
+        filters: { category: category ?? null, country: country ?? null, minRelevance },
+        storiesError: compactDbError(storiesResult.error),
+        discussionsError: compactDbError(discussionsResult.error),
+        hint: 'Check SUPABASE_URL, project status (paused?), and network/DNS.',
+      })
+      return {
+        stories: [],
+        discussions: [],
+        lastUpdated: null,
+        storyCount: 0,
+        effectiveMinRelevance,
+        fallbackTier,
+        usedCountryFallback,
+        storyAttempts,
+      }
+    }
+
     console.error('[DB:getDigest] Query error', {
       filters: { category: category ?? null, country: country ?? null, minRelevance },
       cutoffs: { storiesCutoff, discussionsCutoff },
@@ -202,7 +238,7 @@ export async function getDigest(params: {
   const storiesRaw = (storiesResult.data ?? []) as unknown as Story[]
   const stories = rankStoriesByTrending(storiesRaw).slice(0, 100)
   const discussionsRows = (discussionsResult.data ?? []) as Discussion[]
-  const discussions = rankDiscussionsForDigest(discussionsRows, discussionsCutoff, 20)
+  const discussions = rankDiscussionsForDigest(discussionsRows, discussionsCutoff, 28)
   const lastUpdated = lastIngestResult.data?.ingested_at ?? null
 
   console.log('[DB:getDigest] Query success', {

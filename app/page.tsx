@@ -8,6 +8,7 @@ import CategorySection from '@/components/CategorySection'
 import DiscussionsPanel from '@/components/DiscussionsPanel'
 import RunDigestButton from '@/components/RunDigestButton'
 import StoryCard from '@/components/StoryCard'
+import { isDiscussionFromX } from '@/lib/discussions/display'
 
 export const revalidate = 1800 // 30 min
 
@@ -172,10 +173,11 @@ export default async function DigestPage({ searchParams }: Props) {
               <RunDigestButton />
             </div>
           </div>
-          <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-2.5">
+          <div className="mt-5 grid grid-cols-2 md:grid-cols-5 gap-2.5">
             <KpiCard label="Business stories" value={coreStories.length} />
             <KpiCard label="Trending picks" value={trendingLaneStories.length} />
             <KpiCard label="Live Discussions" value={discussions.length} />
+            <KpiCard label="On X" value={discussions.filter(isDiscussionFromX).length} />
             <KpiCard label="Active Sectors" value={activeCategoriesCount} />
           </div>
         </div>

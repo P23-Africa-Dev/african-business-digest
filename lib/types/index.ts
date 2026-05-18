@@ -130,6 +130,8 @@ export interface Discussion {
   category?: Category | null
   posted_at?: string | null
   ingested_at: string
+  /** Populated after migration 008; infer from URL when null. */
+  source_type?: SourceType | null
 }
 
 export interface DigestData {

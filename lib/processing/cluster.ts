@@ -3,29 +3,13 @@ import { createServerClient } from '@/lib/db/client'
 import { LLM_COUNTRY_TAG_HINTS } from '@/lib/regions'
 import { ClusterResponseSchema } from './schemas'
 import { recordUsage } from './budget'
+import {
+  isCategoryEnumMismatch,
+  toDbSafeCategory,
+  toDbSafeCategoryStrict,
+} from './categories'
 
 const BATCH_SIZE = 50
-const DB_SAFE_CATEGORIES = new Set([
-  'fintech',
-  'logistics',
-  'energy',
-  'retail',
-  'deals_funding',
-  'policy',
-  'business_failures',
-  'society',
-  'trending',
-])
-const CATEGORY_FALLBACK_MAP: Record<string, string> = {
-  agriculture: 'retail',
-  consumer_markets: 'retail',
-  infrastructure: 'logistics',
-}
-
-function toDbSafeCategory(category: string): string {
-  if (DB_SAFE_CATEGORIES.has(category)) return category
-  return CATEGORY_FALLBACK_MAP[category] ?? 'policy'
-}
 
 function computeStoryIngestLane(
   matchingItems: Array<{ url: string; ingest_lane?: string | null }>,
@@ -74,9 +58,12 @@ export async function clusterRawItems(): Promise<number> {
   const rawSelectLegacy =
     'id, title, raw_content, url, source_name, source_type, country_tags, published_at'
 
+  const CLUSTER_SOURCE_TYPES = ['news', 'reddit', 'search'] as const
+
   const fullRes = await db
     .from('raw_items')
     .select(rawSelectFull)
+    .in('source_type', [...CLUSTER_SOURCE_TYPES])
     .gte('ingested_at', cutoff)
     .order('published_at', { ascending: false })
 
@@ -97,6 +84,7 @@ export async function clusterRawItems(): Promise<number> {
     const legacy = await db
       .from('raw_items')
       .select(rawSelectLegacy)
+      .in('source_type', [...CLUSTER_SOURCE_TYPES])
       .gte('ingested_at', cutoff)
       .order('published_at', { ascending: false })
     if (legacy.error) {
@@ -214,20 +202,43 @@ export async function clusterRawItems(): Promise<number> {
       }
 
       let insertedRow: { id: string } | null = null
-      const withLane = await db
-        .from('stories')
-        .insert({ ...baseRow, ingest_lane: storyLane })
-        .select('id')
-        .single()
+      const categoryAttempts = [
+        baseRow.category,
+        toDbSafeCategoryStrict(story.category),
+        'policy',
+      ]
+      const uniqueCategories = [...new Set(categoryAttempts)]
 
-      if (!withLane.error && withLane.data) {
-        insertedRow = withLane.data
-      } else if (withLane.error?.message?.includes('ingest_lane')) {
-        const noLane = await db.from('stories').insert(baseRow).select('id').single()
-        if (!noLane.error && noLane.data) insertedRow = noLane.data
-        else console.error('[Cluster] Failed to insert story:', noLane.error)
-      } else {
-        console.error('[Cluster] Failed to insert story:', withLane.error)
+      for (const category of uniqueCategories) {
+        if (insertedRow) break
+        const row = { ...baseRow, category }
+        const withLane = await db
+          .from('stories')
+          .insert({ ...row, ingest_lane: storyLane })
+          .select('id')
+          .single()
+
+        if (!withLane.error && withLane.data) {
+          insertedRow = withLane.data
+          break
+        }
+
+        if (withLane.error?.message?.includes('ingest_lane')) {
+          const noLane = await db.from('stories').insert(row).select('id').single()
+          if (!noLane.error && noLane.data) {
+            insertedRow = noLane.data
+            break
+          }
+          if (!isCategoryEnumMismatch(noLane.error)) {
+            console.error('[Cluster] Failed to insert story:', noLane.error)
+          }
+          continue
+        }
+
+        if (!isCategoryEnumMismatch(withLane.error)) {
+          console.error('[Cluster] Failed to insert story:', withLane.error)
+          break
+        }
       }
 
       if (!insertedRow) continue

@@ -29,13 +29,21 @@ export const ClusterResponseSchema = z.object({
   stories: z.array(ClusteredStorySchema),
 })
 
+const LlmCategorySchema = z
+  .union([CategorySchema, z.string(), z.null()])
+  .transform((value) => {
+    if (value === null || value === '') return null
+    const parsed = CategorySchema.safeParse(value)
+    return parsed.success ? parsed.data : null
+  })
+
 export const DiscussionFilterSchema = z.object({
   discussions: z.array(
     z.object({
       index: z.number().int().min(0),  // position in the input array — more reliable than URL echo
       excerpt: z.string().max(300).nullable().optional(),
       country_tags: z.array(z.string()),
-      category: CategorySchema.nullable(),
+      category: LlmCategorySchema,
       is_business_relevant: z.boolean(),
     })
   ),

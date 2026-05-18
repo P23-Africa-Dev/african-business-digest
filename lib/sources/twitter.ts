@@ -1,4 +1,10 @@
 import type { IngestLane, RawItem } from '@/lib/types'
+import {
+  AFRICA_QUERY_CATALOG,
+  chunkRotatePool,
+  rotatePool,
+  type AfricaQuerySpec,
+} from './africa-query-catalog'
 
 interface TwitterTweet {
   id: string
@@ -23,62 +29,38 @@ interface TwitterQuery {
 }
 
 const ENABLE_TRENDING_BROAD_INGEST = process.env.ENABLE_TRENDING_BROAD_INGEST === 'true'
-const MAX_TRENDING_TWITTER_QUERIES_PER_RUN = 2
+const MAX_TRENDING_TWITTER_QUERIES_PER_RUN = Math.max(
+  2,
+  Number.parseInt(process.env.MAX_TRENDING_TWITTER_QUERIES_PER_RUN ?? '4', 10) || 4
+)
+const TWITTER_BUSINESS_CHUNK_COUNT = 4
 
-const TWITTER_BUSINESS_QUERIES: TwitterQuery[] = [
-  { q: '(africa startup funding OR fintech) -is:retweet lang:en', countryTags: ['rest_of_africa'], lane: 'business_core' },
-  { q: '(nigeria startup OR nigeria fintech) -is:retweet lang:en', countryTags: ['nigeria'], lane: 'business_core' },
-  { q: '(kenya startup OR kenya fintech) -is:retweet lang:en', countryTags: ['kenya'], lane: 'business_core' },
-  { q: '(south africa business economy) -is:retweet lang:en', countryTags: ['south_africa'], lane: 'business_core' },
-]
+function specToBusinessQuery(spec: AfricaQuerySpec): TwitterQuery | null {
+  if (!spec.twitterBusiness) return null
+  return { q: spec.twitterBusiness, countryTags: spec.countryTags, lane: 'business_core' }
+}
 
-/** Lane B: civic / economy / policy signal (same env gate as Brave trending). */
-const TWITTER_TRENDING_QUERIES: TwitterQuery[] = [
-  {
-    q: '(nigeria economy OR naira OR CBN OR election) -is:retweet lang:en',
-    countryTags: ['nigeria'],
-    lane: 'trending_broad',
-  },
-  {
-    q: '(kenya politics OR economy OR infrastructure) -is:retweet lang:en',
-    countryTags: ['kenya'],
-    lane: 'trending_broad',
-  },
-  {
-    q: '(south africa economy OR rand OR Eskom OR election) -is:retweet lang:en',
-    countryTags: ['south_africa'],
-    lane: 'trending_broad',
-  },
-  {
-    q: '(egypt economy OR currency OR inflation) -is:retweet lang:en',
-    countryTags: ['egypt'],
-    lane: 'trending_broad',
-  },
-  {
-    q: '(ghana economy OR cedi OR election) -is:retweet lang:en',
-    countryTags: ['ghana'],
-    lane: 'trending_broad',
-  },
-]
+function specToTrendingQuery(spec: AfricaQuerySpec): TwitterQuery | null {
+  if (!spec.twitterTrending) return null
+  return { q: spec.twitterTrending, countryTags: spec.countryTags, lane: 'trending_broad' }
+}
+
+const TWITTER_BUSINESS_POOL = AFRICA_QUERY_CATALOG.map(specToBusinessQuery).filter(
+  (q): q is TwitterQuery => q !== null
+)
+const TWITTER_TRENDING_POOL = AFRICA_QUERY_CATALOG.map(specToTrendingQuery).filter(
+  (q): q is TwitterQuery => q !== null
+)
 
 function businessQueriesThisRun(): TwitterQuery[] {
-  const chunk = Math.floor(Date.now() / (4 * 60 * 60 * 1000)) % 2
-  return TWITTER_BUSINESS_QUERIES.filter((_, i) => i % 2 === chunk)
+  return chunkRotatePool(TWITTER_BUSINESS_POOL, TWITTER_BUSINESS_CHUNK_COUNT)
 }
 
 function trendingQueriesThisRun(): TwitterQuery[] {
   if (!ENABLE_TRENDING_BROAD_INGEST) return []
-  const pool = TWITTER_TRENDING_QUERIES
-  if (pool.length === 0) return []
-  const windowStart = Math.floor(Date.now() / (4 * 60 * 60 * 1000))
-  const start = windowStart % pool.length
-  const n = Math.min(MAX_TRENDING_TWITTER_QUERIES_PER_RUN, pool.length)
-  const out: TwitterQuery[] = []
-  for (let i = 0; i < n; i++) {
-    out.push(pool[(start + i) % pool.length]!)
-  }
+  const out = rotatePool(TWITTER_TRENDING_POOL, MAX_TRENDING_TWITTER_QUERIES_PER_RUN)
   if (out.length > 0) {
-    console.log('[Twitter] Trending lane queries this run', { count: out.length, startIndex: start })
+    console.log('[Twitter] Trending lane queries this run', { count: out.length })
   }
   return out
 }

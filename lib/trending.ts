@@ -1,3 +1,4 @@
+import { isDiscussionFromX } from '@/lib/discussions/display'
 import type { Discussion, Story } from '@/lib/types'
 
 const HOUR_MS = 3_600_000
@@ -9,19 +10,52 @@ export function discussionEffectiveAt(d: { posted_at?: string | null; ingested_a
   return Number.isFinite(postedMs) ? Math.max(postedMs, ingestedMs) : ingestedMs
 }
 
+function isRedditDiscussion(d: Discussion): boolean {
+  return d.source_type === 'reddit' || d.platform.startsWith('r/') || d.url.includes('reddit.com')
+}
+
+function byEngagementThenRecency(a: Discussion, b: Discussion): number {
+  if (b.engagement_score !== a.engagement_score) return b.engagement_score - a.engagement_score
+  return discussionEffectiveAt(b) - discussionEffectiveAt(a)
+}
+
+/** Ensures X and Reddit are represented in the digest sidebar, not only web/search. */
 export function rankDiscussionsForDigest(
   rows: Discussion[],
   cutoffIso: string,
   limit: number
 ): Discussion[] {
   const cutoffMs = new Date(cutoffIso).getTime()
-  return rows
+  const eligible = rows
     .filter((d) => discussionEffectiveAt(d) >= cutoffMs)
-    .sort((a, b) => {
-      if (b.engagement_score !== a.engagement_score) return b.engagement_score - a.engagement_score
-      return discussionEffectiveAt(b) - discussionEffectiveAt(a)
-    })
-    .slice(0, limit)
+    .sort(byEngagementThenRecency)
+
+  const minX = Math.min(8, limit)
+  const minReddit = Math.min(5, limit)
+  const picked: Discussion[] = []
+  const seen = new Set<string>()
+
+  const addFrom = (list: Discussion[], max: number) => {
+    let n = 0
+    for (const d of list) {
+      if (picked.length >= limit || n >= max) break
+      if (seen.has(d.id)) continue
+      seen.add(d.id)
+      picked.push(d)
+      n += 1
+    }
+  }
+
+  addFrom(eligible.filter(isDiscussionFromX), minX)
+  addFrom(eligible.filter(isRedditDiscussion), minReddit)
+  for (const d of eligible) {
+    if (picked.length >= limit) break
+    if (seen.has(d.id)) continue
+    seen.add(d.id)
+    picked.push(d)
+  }
+
+  return picked.sort(byEngagementThenRecency)
 }
 
 function recentSourceCount(story: Story, now: number, windowMs: number): number {

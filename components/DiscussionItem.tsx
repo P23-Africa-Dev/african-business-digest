@@ -3,12 +3,13 @@
 import { useState } from 'react'
 import { MessageSquare, ExternalLink, Bookmark, Trash2 } from 'lucide-react'
 import type { Discussion } from '@/lib/types'
+import { discussionPlatformLabel, isDiscussionFromX } from '@/lib/discussions/display'
 import { flagAndLabelForCountryTag } from '@/lib/regions'
 import ConfirmActionModal from './ConfirmActionModal'
 
-function platformIcon(platform: string): string {
-  if (platform.startsWith('r/')) return '🟠'
-  if (platform.includes('twitter') || platform.includes('x.com')) return '𝕏'
+function platformIcon(d: Discussion): string {
+  if (isDiscussionFromX(d)) return '𝕏'
+  if (d.platform.startsWith('r/') || d.source_type === 'reddit') return '🟠'
   return '💬'
 }
 
@@ -16,10 +17,15 @@ export default function DiscussionItem({
   discussion,
   isSaved = false,
   onSavedChange,
+  variant,
+  layout = 'compact',
 }: {
   discussion: Discussion
   isSaved?: boolean
   onSavedChange?: (saved: boolean) => void
+  /** Highlights X-native posts in the Pulse on X section */
+  variant?: 'default' | 'x'
+  layout?: 'compact' | 'grid'
 }) {
   const [saved, setSaved] = useState(isSaved)
   const [saveModalOpen, setSaveModalOpen] = useState(false)
@@ -82,30 +88,51 @@ export default function DiscussionItem({
   return (
     <>
     <div
-      className="rounded-xl border p-3.5 transition-all hover:border-[var(--forest-light)] group"
-      style={{ borderColor: 'var(--rule)', background: 'var(--paper)' }}
+      className={`rounded-xl border transition-all hover:border-[var(--forest-light)] group ${
+        layout === 'grid' ? 'p-4 flex flex-col h-full' : 'p-3.5'
+      }`}
+      style={{
+        borderColor: variant === 'x' ? '#cfd8dc' : 'var(--rule)',
+        background: variant === 'x' ? 'linear-gradient(135deg, #fafbfc 0%, #f4f6f8 100%)' : 'var(--paper)',
+        borderLeftWidth: variant === 'x' ? 3 : undefined,
+        borderLeftColor: variant === 'x' ? '#0f1419' : undefined,
+      }}
     >
-      <div className="flex items-start gap-2">
-        <span className="text-base shrink-0 mt-0.5">{platformIcon(discussion.platform)}</span>
-        <div className="min-w-0">
+      <div className={layout === 'grid' ? 'flex flex-col gap-3 flex-1' : 'flex items-start gap-2'}>
+        <span className={layout === 'grid' ? 'text-lg' : 'text-base shrink-0 mt-0.5'}>{platformIcon(discussion)}</span>
+        <div className={layout === 'grid' ? 'flex flex-col flex-1 min-h-0' : 'min-w-0'}>
           <a
             href={discussion.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-sm font-semibold leading-snug line-clamp-2 group-hover:underline block"
+            className={`font-semibold leading-snug group-hover:underline block ${
+              layout === 'grid' ? 'text-sm line-clamp-4' : 'text-sm line-clamp-2'
+            }`}
             style={{ color: 'var(--ink)' }}
           >
             {discussion.title}
           </a>
           {discussion.excerpt && (
-            <p className="text-xs mt-1 leading-relaxed line-clamp-2" style={{ color: 'var(--ink-soft)' }}>
+            <p
+              className={`text-xs mt-1 leading-relaxed ${layout === 'grid' ? 'line-clamp-3 flex-1' : 'line-clamp-2'}`}
+              style={{ color: 'var(--ink-soft)' }}
+            >
               {discussion.excerpt}
             </p>
           )}
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-            <span className="text-xs" style={{ color: 'var(--ink-soft)' }}>
-              {discussion.platform}
-            </span>
+            {isDiscussionFromX(discussion) ? (
+              <span
+                className="text-[0.65rem] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded"
+                style={{ background: '#0f1419', color: '#fff' }}
+              >
+                {discussionPlatformLabel(discussion)}
+              </span>
+            ) : (
+              <span className="text-xs" style={{ color: 'var(--ink-soft)' }}>
+                {discussionPlatformLabel(discussion)}
+              </span>
+            )}
             {discussion.engagement_score > 0 && (
               <span className="flex items-center gap-0.5 text-xs" style={{ color: 'var(--amber)' }}>
                 <MessageSquare size={10} />
