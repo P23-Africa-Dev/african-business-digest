@@ -4,6 +4,12 @@ interface TwitterTweet {
   id: string
   text: string
   created_at?: string
+  public_metrics?: {
+    like_count?: number
+    retweet_count?: number
+    reply_count?: number
+    quote_count?: number
+  }
 }
 
 interface TwitterSearchResponse {
@@ -85,7 +91,7 @@ async function searchTweets(query: string, bearerToken: string): Promise<Twitter
   const url = new URL('https://api.twitter.com/2/tweets/search/recent')
   url.searchParams.set('query', query)
   url.searchParams.set('max_results', '25')
-  url.searchParams.set('tweet.fields', 'created_at')
+  url.searchParams.set('tweet.fields', 'created_at,public_metrics')
 
   const res = await fetch(url.toString(), {
     headers: {
@@ -97,9 +103,18 @@ async function searchTweets(query: string, bearerToken: string): Promise<Twitter
   return json.data ?? []
 }
 
+function tweetEngagementScore(tweet: TwitterTweet): number {
+  const m = tweet.public_metrics
+  if (!m) return 0
+  return (m.like_count ?? 0) + (m.retweet_count ?? 0) * 2 + (m.reply_count ?? 0) + (m.quote_count ?? 0)
+}
+
 export async function ingestTwitter(): Promise<RawItem[]> {
   const bearerToken = process.env.TWITTER_BEARER_TOKEN
-  if (!bearerToken) return []
+  if (!bearerToken) {
+    console.info('[Twitter] Skipping ingestion: missing TWITTER_BEARER_TOKEN')
+    return []
+  }
 
   const seen = new Set<string>()
   const items: RawItem[] = []
@@ -118,7 +133,7 @@ export async function ingestTwitter(): Promise<RawItem[]> {
           raw_content: tweet.text,
           published_at: tweet.created_at ?? null,
           country_tags: query.countryTags,
-          engagement_score: 0,
+          engagement_score: tweetEngagementScore(tweet),
           ingest_lane: query.lane,
         })
       }
